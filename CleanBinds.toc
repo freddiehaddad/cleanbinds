@@ -6,4 +6,6 @@
 
 Locale.lua
 Bars.lua
+Settings.lua
+Settings.xml
 Core.lua

@@ -83,6 +83,7 @@ local function Initialize()
     end
 
     addon.db = db
+    addon.InitializeSettings()
     addon.state = "ready"
 end
 
@@ -97,7 +98,7 @@ function addon.PrintStatus()
     end
 
     addon.Print(L.READY:format(addon.build.version, addon.build.number, addon.build.interface))
-    addon.Print(L.FOUNDATION_ONLY)
+    addon.Print(L.UI_PREVIEW)
     for _, bar in ipairs(addon.Bars) do
         local count = addon.CountBarButtons(bar)
         local name = addon.GetBarName(bar)
@@ -112,7 +113,9 @@ end
 SLASH_CLEANBINDS1 = "/cleanbinds"
 SlashCmdList.CLEANBINDS = function(message)
     local command = message:match("^%s*(.-)%s*$"):lower()
-    if command == "" or command == "status" then
+    if command == "" and addon.state == "ready" then
+        Settings.OpenToCategory(addon.category:GetID())
+    elseif command == "" or command == "status" then
         addon.PrintStatus()
     else
         addon.Print(L.USAGE)

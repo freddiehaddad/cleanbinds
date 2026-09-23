@@ -19,17 +19,27 @@ for number, definition in ipairs(normalBars) do
         id = "actionbar" .. number,
         frameName = definition[1],
         bindingPrefix = definition[2],
+        hotkeyMethod = "UpdateHotkeys",
         buttonCount = 12,
         nameKey = number == 1 and "BINDING_HEADER_ACTIONBAR" or "BINDING_HEADER_ACTIONBAR" .. number,
         fallbackName = number == 1 and L.MAIN_ACTION_BAR or L.ACTION_BAR:format(number),
     }
 end
 
+addon.Bars[1].mirrors = {
+    {
+        frameName = "OverrideActionBar",
+        buttonNamePrefix = "OverrideActionBarButton",
+        buttonCount = 6,
+    },
+}
+
 local specialBars = {
     {
         id = "pet",
         frameName = "PetActionBar",
         bindingPrefix = "BONUSACTIONBUTTON",
+        hotkeyMethod = "SetHotkeys",
         buttonCount = 10,
         nameKey = "HUD_EDIT_MODE_PET_ACTION_BAR_LABEL",
         fallbackName = L.PET_BAR,
@@ -41,21 +51,6 @@ local specialBars = {
         buttonCount = 10,
         nameKey = "HUD_EDIT_MODE_STANCE_BAR_LABEL",
         fallbackName = L.STANCE_BAR,
-    },
-    {
-        id = "possess",
-        frameName = "PossessActionBar",
-        buttonCount = 2,
-        nameKey = "HUD_EDIT_MODE_POSSESS_ACTION_BAR_LABEL",
-        fallbackName = L.POSSESS_BAR,
-    },
-    {
-        id = "override",
-        frameName = "OverrideActionBar",
-        buttonNamePrefix = "OverrideActionBarButton",
-        bindingPrefix = "ACTIONBUTTON",
-        buttonCount = 6,
-        fallbackName = L.OVERRIDE_BAR,
     },
 }
 
@@ -88,4 +83,15 @@ function addon.CountBarButtons(bar)
         end
     end
     return count
+end
+
+function addon.GetLabelUnavailableReason(bar, index)
+    if not bar.bindingPrefix then
+        return L.NO_NATIVE_LABEL
+    end
+
+    local button = addon.GetBarButton(bar, index)
+    if button and not button.HotKey then
+        return L.NO_NATIVE_LABEL
+    end
 end

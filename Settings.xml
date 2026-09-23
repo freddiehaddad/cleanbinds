@@ -1,0 +1,66 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <Frame name="CleanBindsDescriptionTemplate" mixin="CleanBindsDescriptionMixin" virtual="true">
+        <Size y="72"/>
+        <Layers>
+            <Layer level="ARTWORK">
+                <FontString parentKey="Text" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                    <Anchors>
+                        <Anchor point="TOPLEFT" x="8" y="-4"/>
+                        <Anchor point="BOTTOMRIGHT" x="-20" y="4"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+    </Frame>
+
+    <Button name="CleanBindsBindingCellTemplate" inherits="UIMenuButtonStretchTemplate" virtual="true">
+        <Size x="160" y="22"/>
+        <ButtonText parentKey="Text" maxLines="1">
+            <Size x="150" y="0"/>
+            <Anchors>
+                <Anchor point="CENTER" y="-1"/>
+            </Anchors>
+        </ButtonText>
+        <NormalFont style="GameFontHighlightSmall"/>
+        <DisabledFont style="GameFontDisableSmall"/>
+        <HighlightFont style="GameFontHighlightSmall"/>
+    </Button>
+
+    <Frame name="CleanBindsBindingRowTemplate" enableMouse="true" virtual="true">
+        <Size y="25"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Highlight" setAllPoints="true" hidden="true">
+                    <Color r="1" g="1" b="1" a="0.1"/>
+                </Texture>
+                <FontString parentKey="Label" inherits="GameFontNormal" wordwrap="false" justifyH="LEFT" enableMouse="true">
+                    <Size x="170" y="24"/>
+                    <Anchors>
+                        <Anchor point="LEFT" x="37"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        <Frames>
+            <Button parentKey="Binding" inherits="CleanBindsBindingCellTemplate">
+                <Anchors>
+                    <Anchor point="LEFT" relativePoint="CENTER" x="-80"/>
+                </Anchors>
+            </Button>
+            <Button parentKey="Override" inherits="CleanBindsBindingCellTemplate">
+                <Anchors>
+                    <Anchor point="LEFT" relativeKey="$parent.Binding" relativePoint="RIGHT"/>
+                </Anchors>
+            </Button>
+            <EditBox parentKey="Editor" inherits="InputBoxTemplate" autoFocus="false" hidden="true">
+                <Size y="22"/>
+                <Anchors>
+                    <Anchor point="LEFT" relativeKey="$parent.Override" relativePoint="LEFT" x="6"/>
+                    <Anchor point="RIGHT" relativeKey="$parent.Override" relativePoint="RIGHT" x="-1"/>
+                </Anchors>
+                <TextInsets left="3" right="5" top="0" bottom="0"/>
+                <FontString inherits="GameFontHighlightSmall"/>
+            </EditBox>
+        </Frames>
+    </Frame>
+</Ui>

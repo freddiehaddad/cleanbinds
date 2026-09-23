@@ -67,6 +67,9 @@ local function loadAddon(options)
     end
 
     local addon = {}
+    addon.InitializeSettings = function()
+        addon.category = { GetID = function() return 42 end }
+    end
     for _, path in ipairs({ "Locale.lua", "Bars.lua", "Core.lua" }) do
         local chunk
         if setfenv then
@@ -88,6 +91,10 @@ local function loadAddon(options)
 
     return environment, addon, fire, messages
 end
+
+test("settings prototype compiles", function()
+    assert(loadfile("Settings.lua"))
+end)
 
 test("initializes fresh account data after login", function()
     local env, addon, fire, messages = loadAddon()
@@ -167,7 +174,7 @@ end)
 
 test("maps native bars without mixing up right-side bars", function()
     local env, addon = loadAddon()
-    equal(#addon.Bars, 12)
+    equal(#addon.Bars, 10)
     equal(addon.Bars[4].frameName, "MultiBarRight")
     equal(addon.Bars[4].bindingPrefix, "MULTIACTIONBAR3BUTTON")
     equal(addon.Bars[5].frameName, "MultiBarLeft")
@@ -185,8 +192,14 @@ test("maps native bars without mixing up right-side bars", function()
 
     env.OverrideActionBar = {}
     env.OverrideActionBarButton1 = first
-    equal(addon.GetBarButton(addon.Bars[12], 1), first)
-    equal(addon.CountBarButtons(addon.Bars[12]), 1)
+    local mirror = addon.Bars[1].mirrors[1]
+    equal(mirror.buttonCount, 6)
+    equal(addon.GetBarButton(mirror, 1), first)
+    equal(addon.CountBarButtons(mirror), 1)
+    for _, bar in ipairs(addon.Bars) do
+        assert(bar.id ~= "override")
+        assert(bar.id ~= "possess")
+    end
 end)
 
 test("reports startup status and invalid slash commands", function()
@@ -196,10 +209,45 @@ test("reports startup status and invalid slash commands", function()
     fire("ADDON_LOADED", "CleanBinds")
     env.SlashCmdList.CLEANBINDS(" STATUS ")
     assert(messages[2]:find("Interface 16001", 1, true))
-    assert(messages[3]:find("not implemented yet", 1, true))
+    assert(messages[3]:find("label edits are temporary", 1, true))
     equal(addon.state, "ready")
     env.SlashCmdList.CLEANBINDS("invalid")
     assert(messages[#messages]:find("Usage:", 1, true))
+end)
+
+test("checks native label support while allowing inactive bars", function()
+    local env, addon = loadAddon()
+    equal(addon.GetLabelUnavailableReason(addon.Bars[1], 1), nil)
+    equal(addon.GetLabelUnavailableReason(addon.Bars[9], 1), nil)
+
+    env.MainActionBar = { actionButtons = { {} } }
+    equal(addon.GetLabelUnavailableReason(addon.Bars[1], 1), addon.L.NO_NATIVE_LABEL)
+    env.MainActionBar.actionButtons[1].HotKey = {}
+    equal(addon.GetLabelUnavailableReason(addon.Bars[1], 1), nil)
+end)
+
+test("supports Special Action Buttons without a standard refresh method", function()
+    local env, addon = loadAddon()
+    local stance = addon.Bars[10]
+    equal(stance.id, "stance")
+    equal(stance.bindingPrefix .. 1, "SHAPESHIFTBUTTON1")
+    equal(stance.bindingPrefix .. 10, "SHAPESHIFTBUTTON10")
+    env.StanceBar = { actionButtons = { { HotKey = {} } } }
+    equal(env.StanceBar.actionButtons[1].UpdateHotkeys, nil)
+    equal(env.StanceBar.actionButtons[1].SetHotkeys, nil)
+    equal(addon.GetLabelUnavailableReason(stance, 1), nil)
+    equal(addon.GetBarName(stance), "Stance Bar")
+end)
+
+test("opens the registered settings category from the slash command", function()
+    local env, _, fire = loadAddon({ loggedIn = true })
+    local opened
+    env.Settings.OpenToCategory = function(categoryID)
+        opened = categoryID
+    end
+    fire("ADDON_LOADED", "CleanBinds")
+    env.SlashCmdList.CLEANBINDS("")
+    equal(opened, 42)
 end)
 
 print(("%d tests passed"):format(passed))

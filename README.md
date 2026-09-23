@@ -5,13 +5,13 @@ Targets client **1.60.1.69977**, Interface **16001**.
 
 ## Development status
 
-The addon foundation is implemented: client compatibility checks, account-wide
-saved-data initialization, a native bar inventory, and a diagnostic slash command.
-It does **not yet** provide a settings page or change action-bar labels.
+The native UI is available at **Options -> AddOns -> Clean Binds**, with pages
+for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editable label
+previews, keyboard navigation, reset confirmation, and combat read-only behavior.
 
-The intended UI is **Options -> AddOns -> Clean Binds**, with a page per action
-bar and editable per-button labels. Labels will be shared across characters;
-actual keybindings will not be changed by the addon.
+**Label edits are currently temporary and do not change action bars.** Persistent
+labels and live action-bar rendering are subsequent implementation steps. Actual
+keybindings are never changed by the addon.
 
 ## Installation
 
@@ -27,14 +27,26 @@ to the development directory can be used instead of copying files.
 Restart the client after first installation and enable **Clean Binds** in the
 AddOns list. Use `/reload` after subsequent Lua changes.
 
-## Foundation checkpoint
+## UI checkpoint
 
-Run `/cleanbinds` or `/cleanbinds status` after logging in. It reports the client
-version and the available native button counts. Unavailable special bars are
-reported explicitly; their existence alone does not establish label support.
+Run `/cleanbinds` to open the native settings category, then select an action bar.
+Click a custom-label cell to edit it. Enter, Tab, or clicking elsewhere accepts;
+Escape cancels. Clear a field to restore its default preview. Labels that are too
+wide receive a warning but can still be used.
 
-Reload and repeat the command. No settings window or label changes are expected
-at this stage. Invalid saved data is preserved and reported rather than reset.
+Pet and Stance pages remain available when their bars are inactive. Stance Bar
+contains Blizzard's **Special Action Buttons**, with their distinct
+`SHAPESHIFTBUTTON1` through `SHAPESHIFTBUTTON10` bindings.
+
+There is no separate Possess page. Possession actions that reuse the main action
+buttons use their labels.
+
+Vehicle/override displays use the first six main action-bar bindings. They have
+no separate settings page and will inherit those buttons' labels.
+
+Use `/cleanbinds status` for the client and native bar inventory. Unavailable
+special bars are reported explicitly; their existence alone does not establish
+label support. Invalid saved data is preserved and reported rather than reset.
 
 ## Development checks
 
