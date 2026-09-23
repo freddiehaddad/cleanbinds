@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: Clean Binds
+## Notes: Customize keybinding labels on Blizzard action bars.
+## Version: 0.1.0
+## SavedVariables: CleanBindsDB
+
+Locale.lua
+Bars.lua
+Core.lua
