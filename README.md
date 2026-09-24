@@ -9,9 +9,8 @@ The native UI is available at **Options -> AddOns -> Clean Binds**, with pages
 for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editable label
 previews, keyboard navigation, reset confirmation, and combat read-only behavior.
 
-**Labels are session-only on this beta, and live action-bar rendering is not
-implemented yet.** Edits update the settings table and preview. Actual keybindings
-are never changed by the addon.
+**Labels are session-only on this beta.** Edits update the settings table, preview,
+and real action buttons. Actual keybindings are never changed by the addon.
 
 ## Beta persistence limitation
 
@@ -53,7 +52,7 @@ There is no separate Possess page. Possession actions that reuse the main action
 buttons use their labels.
 
 Vehicle/override displays use the first six main action-bar bindings. They have
-no separate settings page and will inherit those buttons' labels.
+no separate settings page and inherit those buttons' labels.
 
 ## Label behavior
 
@@ -66,6 +65,12 @@ label. Secondary-only changes keep the label when the displayed key is unchanged
 Canceled binding edits, loading binding sets, and changing input devices do not
 clear labels. An override prepared for an unbound button becomes active on its
 first binding.
+
+Custom text follows native hotkey refreshes without changing fonts, colors,
+positions, alpha, or visibility. Unbound buttons retain native range indicators.
+Clearing an override or disabling custom labels restores the latest native text.
+Stance labels use the existing hotkey region even without a normal-bar refresh
+method; their original native text is restored when the override is removed.
 
 Changes are applied to the addon's data table immediately. WoW writes that data
 on reload/logout, but the beta loader limitation prevents reliable restoration.

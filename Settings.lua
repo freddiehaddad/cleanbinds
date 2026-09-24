@@ -351,7 +351,7 @@ local function CreatePage(bar)
 
     local title = AddText(page, "GameFontNormalLarge", addon.GetBarName(bar))
     title:SetPoint("TOPLEFT", 16, -16)
-    local description = AddText(page, "GameFontHighlightSmall", L.SESSION_NOTICE .. "\n" .. L.RENDER_PENDING)
+    local description = AddText(page, "GameFontHighlightSmall", L.SESSION_NOTICE)
     description:SetPoint("TOPLEFT", 16, -46)
     description:SetPoint("TOPRIGHT", -16, -46)
 
@@ -441,9 +441,11 @@ function addon.InitializeSettings()
     layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsDescriptionTemplate", {
         text = L.DESCRIPTION .. "\n" .. L.SESSION_NOTICE .. "\n" .. L.CLEAR_NOTICE,
     }))
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(L.DISPLAY_PENDING_HEADING, L.RENDER_PENDING))
     local setting = Settings.RegisterAddOnSetting(category, "CLEANBINDS_ENABLED", "enabled", addon.db,
         Settings.VarType.Boolean, L.ENABLE_LABELS, true)
+    setting:SetValueChangedCallback(function()
+        addon.RefreshActionLabels()
+    end)
     LockInCombat(Settings.CreateCheckbox(category, setting, L.ENABLE_TOOLTIP))
 
     local reset = CreateSettingsButtonInitializer("", L.RESET_ALL, function()

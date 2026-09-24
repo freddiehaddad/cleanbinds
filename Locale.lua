@@ -9,8 +9,6 @@ addon.L = {
     LOADING = "Waiting for the game to finish loading.",
     READY = "Loaded (WoW %s, build %s, Interface %d).",
     SESSION_NOTICE = "Session-only on this beta: reload or relog may reset your labels.",
-    RENDER_PENDING = "Live action-bar display is not implemented yet.",
-    DISPLAY_PENDING_HEADING = "Action-bar display integration pending",
     BAR_STATUS = "%s: %d/%d buttons available.",
     BAR_UNAVAILABLE = "%s: not currently available.",
     STARTUP_FAILED = "Could not start: %s",
@@ -57,4 +55,5 @@ addon.L = {
     SKIPPED_LABELS = "%d invalid or unsupported saved labels were preserved but will not be applied.",
     CLEARED_LABEL = "%s: cleared its custom label because its displayed binding changed.",
     CLEARED_LABELS = "Cleared %d custom labels because their displayed bindings changed.",
+    LABEL_ACCESS_BLOCKED = "%s Button %d: the client restricted this key label; display updates were skipped.",
 }

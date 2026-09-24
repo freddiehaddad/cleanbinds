@@ -100,6 +100,7 @@ local function Initialize()
     addon.db = db
     addon.InitializeLabels()
     addon.InitializeSettings()
+    addon.InitializeActionLabels()
     addon.state = "ready"
 end
 
@@ -115,7 +116,6 @@ function addon.PrintStatus()
 
     addon.Print(L.READY:format(addon.build.version, addon.build.number, addon.build.interface))
     addon.Print(L.SESSION_NOTICE)
-    addon.Print(L.RENDER_PENDING)
     for _, bar in ipairs(addon.Bars) do
         local count = addon.CountBarButtons(bar)
         local name = addon.GetBarName(bar)

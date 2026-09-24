@@ -7,6 +7,7 @@
 Locale.lua
 Bars.lua
 Labels.lua
+ActionLabels.lua
 Settings.lua
 Settings.xml
 Core.lua

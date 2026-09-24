@@ -29,6 +29,10 @@ local function loadAddon(options)
     environment.Settings = {}
     environment.Enum = { BindingSet = { Default = 0, Account = 1, Character = 2 } }
     environment.C_KeyBindings = { GetBindingContextForAction = function() end }
+    environment.RANGE_INDICATOR = "*"
+    environment.issecretvalue = function(value)
+        return type(value) == "table" and value.secret == true
+    end
     environment.C_Timer = {
         After = function(_, callback)
             timers[#timers + 1] = callback
@@ -59,10 +63,19 @@ local function loadAddon(options)
     environment.InCombatLockdown = function()
         return game.combat
     end
-    environment.hooksecurefunc = function(name, callback)
-        assert(type(environment[name]) == "function", name)
-        hooks[name] = hooks[name] or {}
-        hooks[name][#hooks[name] + 1] = callback
+    environment.hooksecurefunc = function(target, name, callback)
+        if type(target) == "table" then
+            local original = target[name]
+            assert(type(original) == "function", name)
+            target[name] = function(self, ...)
+                original(self, ...)
+                callback(self, ...)
+            end
+        else
+            assert(type(environment[target]) == "function", target)
+            hooks[target] = hooks[target] or {}
+            hooks[target][#hooks[target] + 1] = name
+        end
     end
 
     for _, name in ipairs({
@@ -106,7 +119,7 @@ local function loadAddon(options)
     addon.InitializeSettings = function()
         addon.category = { GetID = function() return 42 end }
     end
-    for _, path in ipairs({ "Locale.lua", "Bars.lua", "Labels.lua", "Core.lua" }) do
+    for _, path in ipairs({ "Locale.lua", "Bars.lua", "Labels.lua", "ActionLabels.lua", "Core.lua" }) do
         local chunk
         if setfenv then
             chunk = assert(loadfile(path))
@@ -115,6 +128,9 @@ local function loadAddon(options)
             chunk = assert(loadfile(path, "t", environment))
         end
         chunk("CleanBinds", addon)
+    end
+    if options.setup then
+        options.setup(environment, game)
     end
 
     local function fire(event, ...)
@@ -297,7 +313,6 @@ test("reports startup status and invalid slash commands", function()
     env.SlashCmdList.CLEANBINDS(" STATUS ")
     assert(messages[2]:find("Interface 16001", 1, true))
     assert(messages[3]:find("Session-only on this beta", 1, true))
-    assert(messages[4]:find("not implemented yet", 1, true))
     equal(addon.state, "ready")
     env.SlashCmdList.CLEANBINDS("invalid")
     assert(messages[#messages]:find("Usage:", 1, true))
@@ -607,6 +622,221 @@ test("default-reset reordering counts as a binding edit", function()
     game.Flush()
     game.Save()
     equal(addon.GetLabel(addon.Bars[1], 1), nil)
+end)
+
+local function mockButton(name, text, shown)
+    local hotkey = { text = text, shown = shown ~= false, alpha = 0.8, writes = 0 }
+    function hotkey:GetText()
+        return self.text
+    end
+    function hotkey:SetText(value)
+        if self.rejectWrite then
+            error("Rejected text write")
+        end
+        self.text = value
+        self.writes = self.writes + 1
+    end
+    function hotkey:IsForbidden()
+        return self.forbidden or false
+    end
+    local button = { HotKey = hotkey, scripts = {} }
+    function button:GetName()
+        return name
+    end
+    function button:IsForbidden()
+        return self.forbidden or false
+    end
+    function button:HookScript(script, callback)
+        self.scripts[script] = self.scripts[script] or {}
+        table.insert(self.scripts[script], callback)
+    end
+    function button:Fire(script)
+        for _, callback in ipairs(self.scripts[script] or {}) do
+            callback(self)
+        end
+    end
+    return button
+end
+
+test("applies and restores actual hotkey text without changing visibility", function()
+    local button = mockButton("ActionButton1", "F", false)
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "MWD"))
+    equal(button.HotKey:GetText(), "MWD")
+    equal(button.HotKey.shown, false)
+    equal(button.HotKey.alpha, 0.8)
+    assert(addon.SetLabel(addon.Bars[1], 1, ""))
+    equal(button.HotKey:GetText(), "F")
+    equal(button.HotKey.shown, false)
+end)
+
+test("restores the latest native text rather than an old snapshot", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    button.HotKey:SetText("New native text")
+    equal(button.HotKey:GetText(), "Custom")
+    assert(addon.ResetLabels("actionbar1"))
+    equal(button.HotKey:GetText(), "New native text")
+end)
+
+test("master disable restores native text and re-enable reapplies labels", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    addon.db.enabled = false
+    addon.RefreshActionLabels()
+    equal(button.HotKey:GetText(), "F")
+    addon.db.enabled = true
+    addon.RefreshActionLabels()
+    equal(button.HotKey:GetText(), "Custom")
+end)
+
+test("vehicle display mirrors share the main button override", function()
+    local main = mockButton("ActionButton1", "F")
+    local vehicle = mockButton("OverrideActionBarButton1", "F")
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { main } }
+            env.OverrideActionBar = {}
+            env.OverrideActionBarButton1 = vehicle
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Shared"))
+    equal(main.HotKey:GetText(), "Shared")
+    equal(vehicle.HotKey:GetText(), "Shared")
+    assert(addon.ResetLabels("actionbar1"))
+    equal(main.HotKey:GetText(), "F")
+    equal(vehicle.HotKey:GetText(), "F")
+end)
+
+test("pet and stance text works without calling native action handlers", function()
+    local pet = mockButton("PetActionButton1", "CTRL-1")
+    local stance = mockButton("StanceButton1", nil)
+    local _, addon = ready({
+        bindings = { BONUSACTIONBUTTON1 = { "CTRL-1" }, SHAPESHIFTBUTTON1 = { "F1" } },
+        setup = function(env)
+            env.PetActionBar = { actionButtons = { pet } }
+            env.StanceBar = { actionButtons = { stance } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[9], 1, "Pet"))
+    assert(addon.SetLabel(addon.Bars[10], 1, "Form"))
+    equal(pet.HotKey:GetText(), "Pet")
+    equal(stance.HotKey:GetText(), "Form")
+    assert(addon.ResetLabels("stance"))
+    equal(stance.HotKey:GetText(), nil)
+    equal(pet.HotKey:GetText(), "Pet")
+end)
+
+test("unbound buttons keep their native range indicator", function()
+    local button = mockButton("ActionButton1", "*", false)
+    local _, addon = ready({
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Dormant"))
+    equal(button.HotKey:GetText(), "*")
+    equal(button.HotKey.shown, false)
+end)
+
+test("custom range-dot text cannot impersonate the native range marker", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "*"))
+    equal(button.HotKey:GetText(), "*|r")
+    equal(addon.GetLabel(addon.Bars[1], 1), "*")
+end)
+
+test("respects native suppression by empty text", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    button.HotKey:SetText("")
+    equal(button.HotKey:GetText(), "")
+    addon.RefreshActionLabels()
+    equal(button.HotKey:GetText(), "")
+    button.HotKey:SetText("F")
+    equal(button.HotKey:GetText(), "Custom")
+end)
+
+test("attaches late native buttons without duplicate hooks", function()
+    local env, addon, fire, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Late"))
+    local button = mockButton("ActionButton1", "F")
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(button.HotKey:GetText(), "Late")
+    addon.RefreshActionLabels()
+    addon.RefreshActionLabels()
+    equal(#button.scripts.OnShow, 1)
+    button:Fire("OnShow")
+    equal(button.HotKey:GetText(), "Late")
+end)
+
+test("leaves secret native text untouched and reports the restriction", function()
+    local secret = { secret = true }
+    local button = mockButton("ActionButton1", secret)
+    local _, addon, _, messages = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    equal(button.HotKey:GetText(), secret)
+    assert(messages[1]:find("restricted this key label", 1, true))
+    addon.RefreshActionLabels()
+    equal(#messages, 1)
+    button.HotKey:SetText("F")
+    equal(button.HotKey:GetText(), "Custom")
+end)
+
+test("releases the reentrancy guard after a rejected native write", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    button.HotKey.rejectWrite = true
+    local success = pcall(addon.SetLabel, addon.Bars[1], 1, "Custom")
+    equal(success, false)
+    button.HotKey.rejectWrite = false
+    addon.RefreshActionLabels()
+    equal(button.HotKey:GetText(), "Custom")
+    button.HotKey:SetText("Latest")
+    assert(addon.ResetLabels())
+    equal(button.HotKey:GetText(), "Latest")
 end)
 
 print(("%d tests passed"):format(passed))
