@@ -839,4 +839,83 @@ test("releases the reentrancy guard after a rejected native write", function()
     equal(button.HotKey:GetText(), "Latest")
 end)
 
+test("committed rebinding restores the new native hotkey", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon, _, _, game = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Old binding"))
+    game.SetKeys("ACTIONBUTTON1", { "G" })
+    button.HotKey:SetText("G")
+    equal(button.HotKey:GetText(), "Old binding")
+    game.Save()
+    game.Flush()
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(button.HotKey:GetText(), "G")
+end)
+
+test("dormant display activates on first binding and restores when unbound", function()
+    local button = mockButton("ActionButton1", "*", false)
+    local _, addon, _, _, game = ready({
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Prepared"))
+    equal(button.HotKey:GetText(), "*")
+    game.SetKeys("ACTIONBUTTON1", { "F" })
+    button.HotKey:SetText("F")
+    button.HotKey.shown = true
+    game.Save()
+    game.Flush()
+    equal(button.HotKey:GetText(), "Prepared")
+    equal(button.HotKey.shown, true)
+    game.SetKeys("ACTIONBUTTON1", {})
+    button.HotKey:SetText("*")
+    button.HotKey.shown = false
+    game.Save()
+    game.Flush()
+    equal(button.HotKey:GetText(), "*")
+    equal(button.HotKey.shown, false)
+end)
+
+test("combat refreshes preserve display while configuration stays locked", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon, _, _, game = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    game.combat = true
+    button.HotKey:SetText("F")
+    equal(button.HotKey:GetText(), "Custom")
+    equal(addon.SetLabel(addon.Bars[1], 1, "Changed"), false)
+    equal(addon.ResetLabels(), false)
+    equal(button.HotKey:GetText(), "Custom")
+    game.combat = false
+    assert(addon.ResetLabels())
+    equal(button.HotKey:GetText(), "F")
+end)
+
+test("forbidden action buttons are never hooked or rewritten", function()
+    local button = mockButton("ActionButton1", "F")
+    button.forbidden = true
+    local _, addon, _, messages = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    equal(button.HotKey:GetText(), "F")
+    equal(button.HotKey.writes, 0)
+    equal(next(button.scripts), nil)
+    equal(#messages, 1)
+end)
+
 print(("%d tests passed"):format(passed))
