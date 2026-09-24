@@ -492,7 +492,7 @@ function addon.InitializeSettings()
                 end
             elseif event == "PLAYER_REGEN_ENABLED" and currentPage.notice == L.COMBAT_READ_ONLY then
                 SetNotice(currentPage, nil)
-            elseif row and event == "GLOBAL_MOUSE_DOWN" and not MouseIsOver(row.Editor) then
+            elseif row and event == "GLOBAL_MOUSE_DOWN" and not row.Editor:IsMouseOver() then
                 if not CommitEdit(row) then
                     CloseEditor(row)
                 end

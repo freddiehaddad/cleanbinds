@@ -119,7 +119,12 @@ local function loadAddon(options)
     addon.InitializeSettings = function()
         addon.category = { GetID = function() return 42 end }
     end
-    for _, path in ipairs({ "Locale.lua", "Bars.lua", "Labels.lua", "ActionLabels.lua", "Core.lua" }) do
+    local paths = { "Locale.lua", "Bars.lua", "Labels.lua", "ActionLabels.lua" }
+    if options.settings then
+        paths[#paths + 1] = "Settings.lua"
+    end
+    paths[#paths + 1] = "Core.lua"
+    for _, path in ipairs(paths) do
         local chunk
         if setfenv then
             chunk = assert(loadfile(path))
@@ -194,10 +199,6 @@ local function loadAddon(options)
 
     return environment, addon, fire, messages, game
 end
-
-test("settings module compiles", function()
-    assert(loadfile("Settings.lua"))
-end)
 
 test("initializes fresh account data after login", function()
     local env, addon, fire, messages = loadAddon()
@@ -361,6 +362,245 @@ local function ready(options)
     equal(addon.state, "ready")
     return env, addon, fire, messages, game
 end
+
+local function readySettings()
+    local pages = {}
+    local env, addon, fire, messages, game = ready({
+        settings = true,
+        setup = function(environment)
+            local function noop() end
+            local createFrame = environment.CreateFrame
+            local function widget(frameType, name, parent, template)
+                local frame = createFrame()
+                frame.shown = true
+                frame.text = ""
+                frame.width, frame.height = 600, 400
+                frame.mouseOver = false
+
+                -- Layout is not simulated; interaction methods below are explicit.
+                for _, method in ipairs({
+                    "SetPoint", "ClearAllPoints", "SetAllPoints", "SetJustifyH",
+                    "SetWordWrap", "SetFontObject", "SetScale", "SetMaxLines",
+                    "SetAtlas", "SetHideIfUnscrollable", "HighlightText", "SetScrollChild",
+                }) do
+                    frame[method] = noop
+                end
+                function frame:SetText(text)
+                    self.text = text
+                    if self.OnTextChanged then
+                        self:OnTextChanged()
+                    end
+                end
+                function frame:GetText()
+                    return self.text
+                end
+                function frame:IsTruncated()
+                    return false
+                end
+                function frame:SetWidth(width)
+                    self.width = width
+                end
+                function frame:GetWidth()
+                    return self.width
+                end
+                function frame:SetHeight(height)
+                    self.height = height
+                end
+                function frame:GetHeight()
+                    return self.height
+                end
+                function frame:SetSize(width, height)
+                    self.width, self.height = width, height
+                end
+                function frame:SetShown(shown)
+                    if self.shown ~= shown then
+                        self.shown = shown
+                        local script = shown and self.OnShow or self.OnHide
+                        if script then
+                            script(self)
+                        end
+                    end
+                end
+                function frame:Show()
+                    self:SetShown(true)
+                end
+                function frame:Hide()
+                    self:SetShown(false)
+                end
+                function frame:IsShown()
+                    return self.shown
+                end
+                function frame:SetEnabled(enabled)
+                    self.enabled = enabled
+                end
+                function frame:IsMouseOver()
+                    return self.mouseOver
+                end
+                function frame:SetFocus()
+                    self.focused = true
+                end
+                function frame:ClearFocus()
+                    if self.focused then
+                        self.focused = false
+                        if self.OnEditFocusLost then
+                            self:OnEditFocusLost()
+                        end
+                    end
+                end
+                function frame:GetVerticalScroll()
+                    return self.offset or 0
+                end
+                function frame:SetVerticalScroll(offset)
+                    self.offset = offset
+                end
+                function frame:HookScript(script, callback)
+                    local previous = self[script]
+                    self[script] = function(self, ...)
+                        if previous then
+                            previous(self, ...)
+                        end
+                        callback(self, ...)
+                    end
+                end
+                frame.CreateFontString = widget
+                frame.CreateTexture = widget
+                if template == "CleanBindsBindingRowTemplate" then
+                    for _, key in ipairs({ "Highlight", "Label", "Binding", "Override", "Editor" }) do
+                        frame[key] = widget()
+                    end
+                    frame.Editor:Hide()
+                elseif template == "ScrollFrameTemplate" then
+                    frame.ScrollBar = widget()
+                end
+                return frame
+            end
+            environment.CreateFrame = widget
+            local initializer = {
+                AddModifyPredicate = noop,
+                AddEvaluateStateFrameEvent = noop,
+                SetValueChangedCallback = noop,
+            }
+            environment.Settings.VarType = { Boolean = "boolean" }
+            environment.Settings.RegisterVerticalLayoutCategory = function()
+                return {}, { AddInitializer = noop }
+            end
+            environment.Settings.RegisterCanvasLayoutSubcategory = function(_, page)
+                pages[#pages + 1] = page
+                return {}
+            end
+            environment.Settings.RegisterAddOnCategory = noop
+            environment.Settings.RegisterAddOnSetting = function() return initializer end
+            environment.Settings.CreateCheckbox = function() return initializer end
+            environment.Settings.CreateElementInitializer = function() return initializer end
+            environment.CreateSettingsButtonInitializer = function() return initializer end
+            environment.StaticPopupDialogs = {}
+            environment.GameTooltip = { Hide = noop }
+        end,
+    })
+    return env, addon, fire, pages, messages, game
+end
+
+test("repeated clicks inside a label editor keep the draft open", function()
+    local env, addon, fire, pages = readySettings()
+    equal(env.MouseIsOver, nil)
+    local page = pages[2]
+    local row = page.rows[3]
+    page:Show()
+    assert(addon.SetLabel(page.bar, row.index, "Original"))
+    row.Override:OnClick()
+    row.Editor:SetText("Draft")
+    row.Editor.mouseOver = true
+
+    for _ = 1, 3 do
+        fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    end
+
+    equal(page.editingRow, row)
+    equal(row.editing, true)
+    equal(row.Editor.focused, true)
+    equal(row.Editor:GetText(), "Draft")
+    equal(addon.GetLabel(page.bar, row.index), "Original")
+end)
+
+test("clicking outside a label editor commits exactly once", function()
+    local _, addon, fire, pages = readySettings()
+    local page = pages[2]
+    local row = page.rows[3]
+    page:Show()
+    row.Override:OnClick()
+    row.Editor:SetText("MWD")
+    local saves = 0
+    local setLabel = addon.SetLabel
+    addon.SetLabel = function(...)
+        saves = saves + 1
+        return setLabel(...)
+    end
+    fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+
+    equal(addon.GetLabel(page.bar, row.index), "MWD")
+    equal(saves, 1)
+    equal(page.editingRow, nil)
+    equal(row.Editor:IsShown(), false)
+    equal(row.Editor.focused, false)
+    equal(row.Override:IsShown(), true)
+end)
+
+test("clicking another label field commits the previous draft", function()
+    local _, addon, fire, pages = readySettings()
+    local page = pages[2]
+    local previous, nextRow = page.rows[3], page.rows[4]
+    page:Show()
+    previous.Override:OnClick()
+    previous.Editor:SetText("MWD")
+    fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    nextRow.Override:OnClick()
+    nextRow.Editor.mouseOver = true
+    fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+
+    equal(addon.GetLabel(page.bar, previous.index), "MWD")
+    equal(previous.editing, false)
+    equal(page.editingRow, nextRow)
+    equal(nextRow.Editor.focused, true)
+end)
+
+test("clicking away from invalid label text preserves the committed value", function()
+    local _, addon, fire, pages = readySettings()
+    local page = pages[2]
+    local row = page.rows[3]
+    page:Show()
+    assert(addon.SetLabel(page.bar, row.index, "Original"))
+    row.Override:OnClick()
+    row.Editor:SetText("Invalid\nlabel")
+    fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+
+    equal(addon.GetLabel(page.bar, row.index), "Original")
+    equal(page.editingRow, nil)
+    equal(page.Status:GetText(), addon.L.INVALID_LABEL)
+end)
+
+test("Escape and combat cancel drafts before subsequent outside clicks", function()
+    for _, combat in ipairs({ false, true }) do
+        local _, addon, fire, pages, _, game = readySettings()
+        local page = pages[2]
+        local row = page.rows[3]
+        page:Show()
+        assert(addon.SetLabel(page.bar, row.index, "Original"))
+        row.Override:OnClick()
+        row.Editor:SetText("Draft")
+        if combat then
+            game.combat = true
+            fire("PLAYER_REGEN_DISABLED")
+            equal(page.Status:GetText(), addon.L.COMBAT_CANCELED)
+        else
+            row.Editor:OnEscapePressed()
+        end
+        fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+        equal(addon.GetLabel(page.bar, row.index), "Original")
+        equal(page.editingRow, nil)
+        equal(row.Editor:IsShown(), false)
+    end
+end)
 
 local function snapshotDatabase(db)
     local snapshot = { schemaVersion = db.schemaVersion, enabled = db.enabled, overrides = {} }
