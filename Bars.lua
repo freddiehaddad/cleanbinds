@@ -95,3 +95,14 @@ function addon.GetLabelUnavailableReason(bar, index)
         return L.NO_NATIVE_LABEL
     end
 end
+
+function addon.GetBindingInfo(bar, index)
+    local command = bar.bindingPrefix .. index
+    local context = C_KeyBindings.GetBindingContextForAction(command)
+    local keys = { GetBindingKey(command, nil, context) }
+    local button = addon.GetBarButton(bar, index)
+    if not keys[1] and button then
+        keys = { GetBindingKey("CLICK " .. button:GetName() .. ":LeftButton", nil, context) }
+    end
+    return command, keys
+end

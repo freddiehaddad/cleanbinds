@@ -1,7 +1,6 @@
 local _, addon = ...
 local L = addon.L
 local pages = {}
-local previewLabels = {}
 local rowHeight = 25
 local previewSize = 56
 local previewScale = previewSize / 45
@@ -12,14 +11,6 @@ CleanBindsDescriptionMixin = {}
 
 function CleanBindsDescriptionMixin:Init(initializer)
     self.Text:SetText(initializer.data.text)
-end
-
-local function Literal(text)
-    return (text:gsub("|", "||"))
-end
-
-local function LabelKey(row)
-    return row.page.bar.id .. ":" .. row.index
 end
 
 local function SetNotice(page, text)
@@ -36,22 +27,18 @@ end
 
 local function RefreshBinding(row)
     local bar = row.page.bar
-    local command = bar.bindingPrefix and bar.bindingPrefix .. row.index
-    local button = addon.GetBarButton(bar, row.index)
-    row.keys = command and { GetBindingKey(command) } or {}
-    if command and not row.keys[1] and button then
-        row.keys = { GetBindingKey("CLICK " .. button:GetName() .. ":LeftButton") }
-    end
-    row.name = command and GetBindingName(command) or L.BUTTON_NAME:format(addon.GetBarName(bar), row.index)
+    local command, keys = addon.GetBindingInfo(bar, row.index)
+    row.keys = keys
+    row.name = GetBindingName(command)
     row.Label:SetText(row.name)
-    row.Binding:SetText(command and (row.keys[1] and GetBindingText(row.keys[1]) or L.NOT_BOUND) or L.NO_BINDING)
+    row.Binding:SetText(row.keys[1] and GetBindingText(row.keys[1]) or L.NOT_BOUND)
     row.defaultLabel = row.keys[1] and GetBindingText(row.keys[1], true) or ""
     row.unavailableReason = addon.GetLabelUnavailableReason(bar, row.index)
 end
 
 local function RefreshCell(row)
-    local label = previewLabels[LabelKey(row)]
-    row.Override:SetText(row.unavailableReason and L.UNAVAILABLE or (label and Literal(label) or L.DEFAULT_LABEL))
+    local label = addon.GetLabel(row.page.bar, row.index)
+    row.Override:SetText(row.unavailableReason and L.UNAVAILABLE or (label and addon.LiteralLabel(label) or L.DEFAULT_LABEL))
     row.Override:SetEnabled(not InCombatLockdown() and not row.unavailableReason)
 end
 
@@ -126,14 +113,16 @@ local function UpdatePreview(page)
 
     local button = addon.GetBarButton(page.bar, row.index)
     local accurate = UpdatePreviewGeometry(page.Preview, button)
-    local label = row.editing and row.Editor:GetText() or previewLabels[LabelKey(row)]
-    local customLabel = label and label:match("^%s*(.-)%s*$") or ""
-    page.Preview.HotKey:SetText(customLabel ~= "" and Literal(customLabel) or row.defaultLabel)
+    local label = row.editing and row.Editor:GetText() or addon.GetLabel(page.bar, row.index)
+    local customLabel, validationError = addon.NormalizeLabel(label or "")
+    page.Preview.HotKey:SetText(customLabel and customLabel ~= "" and addon.LiteralLabel(customLabel) or row.defaultLabel)
     page.PreviewTitle:SetText(row.name)
     page.PreviewDefault:SetText(L.PREVIEW_DEFAULT:format(row.defaultLabel ~= "" and row.defaultLabel or L.NOT_BOUND))
 
     if page.notice then
         page.Status:SetText(page.notice)
+    elseif validationError then
+        page.Status:SetText(validationError)
     elseif InCombatLockdown() then
         page.Status:SetText(L.COMBAT_READ_ONLY)
     elseif page.Preview.HotKey:IsTruncated() then
@@ -193,17 +182,23 @@ local function CommitEdit(row)
         return false
     end
 
-    local value = row.Editor:GetText()
-    if value:find("%c") then
-        SetNotice(row.page, L.INVALID_LABEL)
+    local success, reason = addon.SetLabel(row.page.bar, row.index, row.Editor:GetText())
+    if not success then
+        SetNotice(row.page, reason)
         return false
     end
-    value = value:match("^%s*(.-)%s*$")
 
-    previewLabels[LabelKey(row)] = value ~= "" and value or nil
     SetNotice(row.page, nil)
     CloseEditor(row)
     return true
+end
+
+local function FinishPageEdit(page)
+    local row = page.editingRow
+    if row and not CommitEdit(row) then
+        addon.Print(page.notice or L.INVALID_LABEL)
+        CloseEditor(row)
+    end
 end
 
 local function BeginEdit(row)
@@ -225,7 +220,7 @@ local function BeginEdit(row)
     row.editing = true
     row.page.editingRow = row
     row.Override:Hide()
-    row.Editor:SetText(previewLabels[LabelKey(row)] or "")
+    row.Editor:SetText(addon.GetLabel(row.page.bar, row.index) or "")
     row.Editor:Show()
     row.Editor:SetFocus()
     row.Editor:HighlightText()
@@ -272,18 +267,13 @@ local function RefreshPages()
         end
     end
 end
+addon.RefreshSettings = RefreshPages
 
 local function ResetLabels(barID)
-    if InCombatLockdown() then
-        addon.Print(L.COMBAT_READ_ONLY)
-        return
+    local success, reason = addon.ResetLabels(barID)
+    if not success then
+        addon.Print(reason)
     end
-    for key in pairs(previewLabels) do
-        if not barID or key:match("^(.-):") == barID then
-            previewLabels[key] = nil
-        end
-    end
-    RefreshPages()
 end
 
 local function ConfirmReset(bar)
@@ -361,7 +351,7 @@ local function CreatePage(bar)
 
     local title = AddText(page, "GameFontNormalLarge", addon.GetBarName(bar))
     title:SetPoint("TOPLEFT", 16, -16)
-    local description = AddText(page, "GameFontHighlightSmall", L.ACCOUNT_NOTICE .. "\n" .. L.UI_PREVIEW)
+    local description = AddText(page, "GameFontHighlightSmall", L.SESSION_NOTICE .. "\n" .. L.RENDER_PENDING)
     description:SetPoint("TOPLEFT", 16, -46)
     description:SetPoint("TOPRIGHT", -16, -46)
 
@@ -428,13 +418,10 @@ local function CreatePage(bar)
         RefreshPage(page)
     end)
     page:SetScript("OnHide", function()
-        local row = page.editingRow
-        if row and not CommitEdit(row) then
-            addon.Print(page.notice or L.INVALID_LABEL)
-            CloseEditor(row)
-        end
+        FinishPageEdit(page)
         GameTooltip:Hide()
     end)
+    page.OnCommit = FinishPageEdit
     page.OnRefresh = RefreshPage
     pages[#pages + 1] = page
     return page
@@ -452,9 +439,9 @@ function addon.InitializeSettings()
     local category, layout = Settings.RegisterVerticalLayoutCategory(L.ADDON_NAME)
     addon.category = category
     layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsDescriptionTemplate", {
-        text = L.DESCRIPTION .. "\n" .. L.ACCOUNT_NOTICE .. "\n" .. L.CLEAR_NOTICE,
+        text = L.DESCRIPTION .. "\n" .. L.SESSION_NOTICE .. "\n" .. L.CLEAR_NOTICE,
     }))
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(L.PREVIEW_HEADING, L.UI_PREVIEW))
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(L.DISPLAY_PENDING_HEADING, L.RENDER_PENDING))
     local setting = Settings.RegisterAddOnSetting(category, "CLEANBINDS_ENABLED", "enabled", addon.db,
         Settings.VarType.Boolean, L.ENABLE_LABELS, true)
     LockInCombat(Settings.CreateCheckbox(category, setting, L.ENABLE_TOOLTIP))

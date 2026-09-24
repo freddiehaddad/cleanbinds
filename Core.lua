@@ -17,9 +17,24 @@ local function CheckCapabilities()
         return L.UNSUPPORTED_INTERFACE:format(tostring(interface))
     end
 
-    for _, name in ipairs({ "GetBindingKey", "GetBindingName", "GetBindingText", "hooksecurefunc", "InCombatLockdown" }) do
+    for _, name in ipairs({
+        "GetBindingKey", "GetBindingName", "GetBindingText", "GetCurrentBindingSet",
+        "SaveBindings", "LoadBindings", "SetBinding", "hooksecurefunc", "InCombatLockdown",
+    }) do
         if type(_G[name]) ~= "function" then
             return L.MISSING_API:format(name)
+        end
+    end
+    if type(C_KeyBindings) ~= "table" or type(C_KeyBindings.GetBindingContextForAction) ~= "function" then
+        return L.MISSING_API:format("C_KeyBindings.GetBindingContextForAction")
+    end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        return L.MISSING_API:format("C_Timer.After")
+    end
+    for _, name in ipairs({ "Default", "Account", "Character" }) do
+        if type(Enum) ~= "table" or type(Enum.BindingSet) ~= "table"
+            or type(Enum.BindingSet[name]) ~= "number" then
+            return L.MISSING_API:format("Enum.BindingSet." .. name)
         end
     end
 
@@ -83,6 +98,7 @@ local function Initialize()
     end
 
     addon.db = db
+    addon.InitializeLabels()
     addon.InitializeSettings()
     addon.state = "ready"
 end
@@ -98,7 +114,8 @@ function addon.PrintStatus()
     end
 
     addon.Print(L.READY:format(addon.build.version, addon.build.number, addon.build.interface))
-    addon.Print(L.UI_PREVIEW)
+    addon.Print(L.SESSION_NOTICE)
+    addon.Print(L.RENDER_PENDING)
     for _, bar in ipairs(addon.Bars) do
         local count = addon.CountBarButtons(bar)
         local name = addon.GetBarName(bar)
