@@ -3,11 +3,12 @@
 Custom action-bar keybinding labels for World of Warcraft: Forever beta.
 Targets client **1.60.1.69977**, Interface **16001**.
 
-## Development status
+## Features
 
 The native UI is available at **Options -> AddOns -> Clean Binds**, with pages
-for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editable label
-previews, keyboard navigation, reset confirmation, and combat read-only behavior.
+for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editable
+label previews, keyboard navigation, reset confirmation, and combat read-only
+behavior.
 
 **Labels are session-only on this beta.** Edits update the settings table, preview,
 and real action buttons. Actual keybindings are never changed by the addon.
@@ -37,12 +38,25 @@ to the development directory can be used instead of copying files.
 Restart the client after first installation and enable **Clean Binds** in the
 AddOns list. Use `/reload` after subsequent Lua changes.
 
-## UI checkpoint
+## Usage
 
-Run `/cleanbinds` to open the native settings category, then select an action bar.
-Click a custom-label cell to edit it. Enter, Tab, or clicking elsewhere accepts;
-Escape cancels. Clear a field to restore its default preview. Labels that are too
-wide receive a warning but can still be used.
+1. Run `/cleanbinds`, or open **Esc -> Options -> AddOns -> Clean Binds**.
+2. Select the action bar containing the button you want to customize.
+3. Click its **Custom label** cell, type a label such as `MWD`, and press Enter.
+
+The action-button name and current binding are read-only. Hover the binding to
+see its full text and any additional assigned keys. Only the custom label changes.
+
+Tab/Shift-Tab accepts an edit and moves between label fields. Clicking elsewhere
+also accepts; Escape cancels the current edit. Clear a field to restore the
+native label. A preview shows the label at a shared magnification, preserving
+native button and font proportions. Oversized labels warn but remain allowed.
+
+Use **Reset This Bar** to clear one bar's overrides, or **Reset All Labels** on
+the parent page to clear every override. Both require confirmation. Turning off
+**Enable custom labels** restores native text without discarding your labels.
+
+## Supported bars
 
 Pet and Stance pages remain available when their bars are inactive. Stance Bar
 contains Blizzard's **Special Action Buttons**, with their distinct
@@ -52,7 +66,11 @@ There is no separate Possess page. Possession actions that reuse the main action
 buttons use their labels.
 
 Vehicle/override displays use the first six main action-bar bindings. They have
-no separate settings page and inherit those buttons' labels.
+no separate settings page and inherit those buttons' labels. This mapping has
+source and automated coverage, but **vehicle entry has not been verified in game**.
+
+Third-party action bars, extra-action/totem/flyout buttons, appearance controls,
+profiles, and other WoW clients are outside the current scope.
 
 ## Label behavior
 
@@ -82,8 +100,8 @@ reported and preserved, not silently deleted. A confirmed Reset All Labels also
 removes invalid entries; resetting one bar leaves other bars alone.
 
 Use `/cleanbinds status` for the client and native bar inventory. Unavailable
-special bars are reported explicitly; their existence alone does not establish
-label support. Invalid saved data is preserved and reported rather than reset.
+special bars are reported explicitly. No chat output is produced during normal
+startup unless a compatibility or data error needs attention.
 
 ## Development checks
 
@@ -100,5 +118,21 @@ nvim --clean --headless -l tests\run.lua
 ```
 
 These checks cover startup, saved-data preservation, label validation, binding
-transactions, capability errors, and bar mapping. Native rendering and protected
-gameplay behavior require in-game review.
+transactions, capability errors, bar mapping, live text restoration, range
+indicators, and restricted-frame handling. Mocked SavedVariables tests verify
+behavior when data is supplied; they do not establish that the beta loader works.
+
+For in-game verification, keep checks within one session on this beta:
+
+1. Confirm distinct `MWD`/`MWU` labels on real buttons without changing bindings.
+2. Clear an override and toggle the addon setting off/on; verify native/custom
+   text restoration.
+3. Rebind a labeled spare button through WoW, save, and confirm its override
+   clears to the new native text. Secondary-only or canceled changes retain it.
+4. Exercise Pet/Stance buttons, paging/form changes, combat refreshes, editing
+   lockout, and another UI scale. Restore changed bindings and UI scale afterward.
+5. When available, check main-bar labels in vehicle/override states. Record an
+   unavailable state as unverified, not passed.
+
+Recheck reload, relog, restart, and cross-character persistence after Blizzard
+fixes the loader; only then remove or revise the session-only notices.
