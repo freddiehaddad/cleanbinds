@@ -39,7 +39,7 @@ local function loadAddon(options)
         end,
     }
     environment.GetBuildInfo = function()
-        return "1.60.1", "69977", "", options.interface or 16001
+        return "1.60.1", "70009", "", options.interface or 16001
     end
     environment.IsLoggedIn = function()
         return options.loggedIn or false
@@ -312,7 +312,7 @@ test("reports startup status and invalid slash commands", function()
     fire("ADDON_LOADED", "CleanBinds")
     env.SlashCmdList.CLEANBINDS(" STATUS ")
     assert(messages[2]:find("Interface 16001", 1, true))
-    assert(messages[3]:find("Session-only on this beta", 1, true))
+    equal(messages[3], addon.L.ADDON_NAME .. ": " .. addon.L.ACCOUNT_NOTICE)
     equal(addon.state, "ready")
     env.SlashCmdList.CLEANBINDS("invalid")
     assert(messages[#messages]:find("Usage:", 1, true))
@@ -362,6 +362,27 @@ local function ready(options)
     return env, addon, fire, messages, game
 end
 
+local function snapshotDatabase(db)
+    local snapshot = { schemaVersion = db.schemaVersion, enabled = db.enabled, overrides = {} }
+    for id, label in pairs(db.overrides) do
+        snapshot.overrides[id] = label
+    end
+    return snapshot
+end
+
+test("initializes saved data loaded after addon files but before login", function()
+    local env, addon, fire = loadAddon()
+    local saved = { schemaVersion = 1, enabled = false, overrides = { ["stance:1"] = "Form" } }
+    env.CleanBindsDB = saved
+    fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.state, "loading")
+    equal(env.CleanBindsDB, saved)
+    fire("PLAYER_LOGIN")
+    equal(addon.db, saved)
+    equal(addon.db.enabled, false)
+    equal(addon.GetLabel(addon.Bars[10], 1), "Form")
+end)
+
 test("normalizes Unicode labels without truncation", function()
     local _, addon = ready()
     local label = "\231\159\173\226\134\147"
@@ -390,13 +411,31 @@ test("restores independent labels when the client supplies saved data", function
     assert(addon.SetLabel(addon.Bars[2], 1, "Different"))
     equal(addon.GetLabel(addon.Bars[1], 1), "MWD")
     equal(addon.GetLabel(addon.Bars[2], 1), "Different")
-    local _, other, _, messages = ready({
-        database = env.CleanBindsDB,
+    local _, other, _, messages, game = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
         bindings = { ACTIONBUTTON1 = { "F" } },
     })
+    game.Save()
     equal(other.GetLabel(other.Bars[1], 1), "MWD")
     equal(other.GetLabel(other.Bars[2], 1), "Different")
     equal(#messages, 0)
+end)
+
+test("restores edited and cleared labels with the saved enable state", function()
+    local env, addon = ready()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Original"))
+    assert(addon.SetLabel(addon.Bars[1], 2, "Remove"))
+    local reloaded, other = ready({ database = snapshotDatabase(env.CleanBindsDB) })
+    assert(other.SetLabel(other.Bars[1], 1, "Updated"))
+    assert(other.SetLabel(other.Bars[1], 2, ""))
+    other.db.enabled = false
+
+    local _, restored = ready({ database = snapshotDatabase(reloaded.CleanBindsDB) })
+    equal(restored.GetLabel(restored.Bars[1], 1), "Updated")
+    equal(restored.GetLabel(restored.Bars[1], 2), nil)
+    equal(restored.db.enabled, false)
+    equal(addon.GetLabel(addon.Bars[1], 1), "Original")
+    equal(addon.GetLabel(addon.Bars[1], 2), "Remove")
 end)
 
 test("clears blank labels and scopes resets to the requested bar", function()

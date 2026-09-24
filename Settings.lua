@@ -351,7 +351,7 @@ local function CreatePage(bar)
 
     local title = AddText(page, "GameFontNormalLarge", addon.GetBarName(bar))
     title:SetPoint("TOPLEFT", 16, -16)
-    local description = AddText(page, "GameFontHighlightSmall", L.SESSION_NOTICE)
+    local description = AddText(page, "GameFontHighlightSmall", L.ACCOUNT_NOTICE)
     description:SetPoint("TOPLEFT", 16, -46)
     description:SetPoint("TOPRIGHT", -16, -46)
 
@@ -439,7 +439,7 @@ function addon.InitializeSettings()
     local category, layout = Settings.RegisterVerticalLayoutCategory(L.ADDON_NAME)
     addon.category = category
     layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsDescriptionTemplate", {
-        text = L.DESCRIPTION .. "\n" .. L.SESSION_NOTICE .. "\n" .. L.CLEAR_NOTICE,
+        text = L.DESCRIPTION .. "\n" .. L.ACCOUNT_NOTICE .. "\n" .. L.CLEAR_NOTICE,
     }))
     local setting = Settings.RegisterAddOnSetting(category, "CLEANBINDS_ENABLED", "enabled", addon.db,
         Settings.VarType.Boolean, L.ENABLE_LABELS, true)

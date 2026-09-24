@@ -115,7 +115,7 @@ function addon.PrintStatus()
     end
 
     addon.Print(L.READY:format(addon.build.version, addon.build.number, addon.build.interface))
-    addon.Print(L.SESSION_NOTICE)
+    addon.Print(L.ACCOUNT_NOTICE)
     for _, bar in ipairs(addon.Bars) do
         local count = addon.CountBarButtons(bar)
         local name = addon.GetBarName(bar)

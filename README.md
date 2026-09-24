@@ -1,7 +1,7 @@
 # Clean Binds
 
 Custom action-bar keybinding labels for World of Warcraft: Forever beta.
-Targets client **1.60.1.69977**, Interface **16001**.
+Targets client **1.60.1.70009**, Interface **16001**.
 
 ## Features
 
@@ -10,19 +10,15 @@ for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editab
 label previews, keyboard navigation, reset confirmation, and combat read-only
 behavior.
 
-**Labels are session-only on this beta.** Edits update the settings table, preview,
-and real action buttons. Actual keybindings are never changed by the addon.
+**Labels and settings are saved account-wide across characters.** Edits update
+the settings table, preview, and real action buttons. Actual keybindings are
+never changed by the addon.
 
-## Beta persistence limitation
+## Saved settings
 
-In build 69977, the client wrote CleanBinds' SavedVariables correctly but did not
-load them before addon initialization. Labels can therefore disappear after
-`/reload`, relogging, or restarting WoW. The UI warns about this limitation.
-
-This matches the [SavedVariables loader issue reported for the Forever beta](https://eu.forums.blizzard.com/en/wow/t/forever-beta-160169913-savedvariables-fail-to-load-on-client-startupreload-%E2%80%94-all-addon-settings-reset-on-restart/629888).
-Standard account-wide SavedVariables support is retained, but persistence and
-cross-character sharing are deferred until the client loader is working and
-verified. No external workaround, custom file loader, or background tool is used.
+Labels and the **Enable custom labels** setting are shared by all characters on
+the same WoW account. Changes are saved automatically when you reload the UI or
+log out.
 
 ## Installation
 
@@ -53,8 +49,9 @@ native label. A preview shows the label at a shared magnification, preserving
 native button and font proportions. Oversized labels warn but remain allowed.
 
 Use **Reset This Bar** to clear one bar's overrides, or **Reset All Labels** on
-the parent page to clear every override. Both require confirmation. Turning off
-**Enable custom labels** restores native text without discarding your labels.
+the parent page to clear every override. Both affect all characters and require
+confirmation. Turning off **Enable custom labels** restores native text without
+discarding your labels; this setting is also shared across characters.
 
 ## Supported bars
 
@@ -78,11 +75,11 @@ Labels belong to individual buttons, not spells or globally renamed keys. Empty
 or whitespace-only labels restore the default. Long labels are allowed with a
 fit warning; text is preserved as UTF-8 and displayed literally.
 
-Within a session, a committed change to a button's displayed binding clears its
-label. Secondary-only changes keep the label when the displayed key is unchanged.
-Canceled binding edits, loading binding sets, and changing input devices do not
-clear labels. An override prepared for an unbound button becomes active on its
-first binding.
+A committed change to a button's displayed binding clears its label for **all
+characters**. Secondary-only changes keep the label when the displayed key is
+unchanged. Canceled binding edits, loading binding sets, switching characters,
+and changing input devices do not clear labels. An override prepared for an
+unbound button becomes active on its first binding.
 
 Custom text follows native hotkey refreshes without changing fonts, colors,
 positions, alpha, or visibility. Unbound buttons retain native range indicators.
@@ -91,9 +88,8 @@ Stance labels use the existing hotkey region even without a normal-bar refresh
 method; their original native text is restored when the override is removed.
 
 Changes are applied to the addon's data table immediately. WoW writes that data
-on reload/logout, but the beta loader limitation prevents reliable restoration.
-Labels edited after a pending rebind are associated with the new binding rather
-than being cleared when that binding is saved.
+on reload/logout. Labels edited after a pending rebind are associated with the
+new binding rather than being cleared when that binding is saved.
 
 All edit/reset controls are read-only during combat. Invalid saved entries are
 reported and preserved, not silently deleted. A confirmed Reset All Labels also
@@ -122,7 +118,7 @@ transactions, capability errors, bar mapping, live text restoration, range
 indicators, and restricted-frame handling. Mocked SavedVariables tests verify
 behavior when data is supplied; they do not establish that the beta loader works.
 
-For in-game verification, keep checks within one session on this beta:
+For in-game verification:
 
 1. Confirm distinct `MWD`/`MWU` labels on real buttons without changing bindings.
 2. Clear an override and toggle the addon setting off/on; verify native/custom
@@ -133,6 +129,3 @@ For in-game verification, keep checks within one session on this beta:
    lockout, and another UI scale. Restore changed bindings and UI scale afterward.
 5. When available, check main-bar labels in vehicle/override states. Record an
    unavailable state as unverified, not passed.
-
-Recheck reload, relog, restart, and cross-character persistence after Blizzard
-fixes the loader; only then remove or revise the session-only notices.
