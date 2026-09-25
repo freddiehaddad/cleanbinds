@@ -1,3 +1,5 @@
+<img align="right" src="Media/Icon.svg" alt="Clean Binds emblem" width="96" height="96">
+
 # Clean Binds
 
 Custom action-bar keybinding labels for World of Warcraft: Forever beta.

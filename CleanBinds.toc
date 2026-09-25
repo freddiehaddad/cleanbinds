@@ -1,6 +1,7 @@
 ## Interface: 16001
 ## Title: Clean Binds
 ## Notes: Customize keybinding labels on Blizzard action bars.
+## IconTexture: Interface\AddOns\CleanBinds\Media\Icon.tga
 ## Version: 0.1.0
 ## SavedVariables: CleanBindsDB
 ## SavedVariablesPerCharacter: CleanBindsCharacterDB

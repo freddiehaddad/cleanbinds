@@ -1,0 +1,243 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="256" height="256" viewBox="0 0 256 256">
+  <title>Clean Binds</title>
+  <desc>Raised ivory CB lettering and an engraved gold compass frame over a stylized teal world map.</desc>
+  <defs>
+    <radialGradient id="sea" cx="50%" cy="45%" r="80%">
+      <stop stop-color="#08728a"/>
+      <stop offset="1" stop-color="#06465b"/>
+    </radialGradient>
+    <mask id="compass-rim">
+      <rect width="256" height="256" fill="#fff"/>
+      <circle cx="128" cy="128" r="87" fill="#000"/>
+    </mask>
+    <radialGradient id="disc" cx="34%" cy="25%" r="85%">
+      <stop stop-color="#0b8299"/>
+      <stop offset=".58" stop-color="#006783"/>
+      <stop offset="1" stop-color="#003c54"/>
+    </radialGradient>
+    <linearGradient id="gold-face" x1=".15" y1="0" x2=".8" y2="1">
+      <stop stop-color="#f4e0b6"/>
+      <stop offset=".23" stop-color="#d6bd91"/>
+      <stop offset=".5" stop-color="#c6af8d"/>
+      <stop offset=".76" stop-color="#a5855c"/>
+      <stop offset="1" stop-color="#785b3e"/>
+    </linearGradient>
+    <linearGradient id="gold-edge" x1=".1" y1=".05" x2=".75" y2="1">
+      <stop stop-color="#fff1cc"/>
+      <stop offset=".36" stop-color="#e1cba0"/>
+      <stop offset=".7" stop-color="#66503a"/>
+      <stop offset="1" stop-color="#e2c39a"/>
+    </linearGradient>
+    <linearGradient id="ivory-face" x1=".25" y1="0" x2=".55" y2="1">
+      <stop stop-color="#fffbea"/>
+      <stop offset=".46" stop-color="#fff1db"/>
+      <stop offset=".8" stop-color="#efddbb"/>
+      <stop offset="1" stop-color="#d6bd91"/>
+    </linearGradient>
+    <linearGradient id="ivory-edge" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#fffeee"/>
+      <stop offset=".42" stop-color="#ddc9a0"/>
+      <stop offset=".72" stop-color="#8c7251"/>
+      <stop offset="1" stop-color="#f3debb"/>
+    </linearGradient>
+    <filter id="cast-shadow" x="-15%" y="-15%" width="135%" height="140%">
+      <feGaussianBlur stdDeviation="1.6"/>
+    </filter>
+    <filter id="metal-grain" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence baseFrequency=".31" numOctaves="2" seed="9" type="fractalNoise"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope=".055"/>
+      </feComponentTransfer>
+      <feComposite in2="SourceGraphic" operator="in" result="surface-grain"/>
+      <feBlend in="SourceGraphic" in2="surface-grain" mode="soft-light"/>
+    </filter>
+    <clipPath id="disc-clip">
+      <circle cx="128" cy="128" r="85"/>
+    </clipPath>
+    <g id="rim-form" mask="url(#compass-rim)">
+      <circle cx="128" cy="128" r="101"/>
+      <path d="M41 52H215V207H41Z"/>
+      <path d="M102 32 128 7 154 32ZM102 224 128 249 154 224Z"/>
+    </g>
+    <g id="letterforms" fill-rule="evenodd">
+      <path id="letter-c"
+        d="M116 65 119 101 109 92C99 80 85 82 79 96C72 111 72 144 79 160C86 177 101 176 113 164L120 154 116 188C109 184 106 185 101 188C94 192 84 191 75 188C53 179 48 153 48 128C48 101 57 78 75 70C89 64 102 66 110 71Z"/>
+      <path id="letter-b"
+        d="M126 69H162C185 69 198 79 198 96C198 109 192 119 179 124C197 129 204 141 204 155C204 178 190 189 166 189H123L133 175V83ZM153 87H161C171 87 177 91 177 101C177 111 171 116 161 116H153ZM153 135H165C177 135 182 142 182 153C182 165 176 173 163 173H153Z"/>
+    </g>
+    <mask id="letter-highlight" maskUnits="userSpaceOnUse" x="35" y="50" width="185" height="160">
+      <use xlink:href="#letterforms" fill="#fff"/>
+      <use xlink:href="#letterforms" transform="translate(1.4 1.5)" fill="#000"/>
+    </mask>
+    <mask id="letter-shade" maskUnits="userSpaceOnUse" x="35" y="50" width="185" height="160">
+      <use xlink:href="#letterforms" fill="#fff"/>
+      <use xlink:href="#letterforms" transform="translate(-1.3 -1.5)" fill="#000"/>
+    </mask>
+    <g id="rune-a">
+      <path d="M-2.5 3 .5-3 3 3M-1.3.5H1.8M.5-3V-4.5"/>
+    </g>
+    <g id="rune-b">
+      <path d="M-2.5-3V3L2.5 0-2.5-3M-2.5 3H3M1-2 3-4"/>
+    </g>
+    <g id="rune-c">
+      <path d="M-3-2 0-4 3-2 0 1-3-2M0 1V4M-2 3 0 4 2 3"/>
+    </g>
+    <g id="rune-d">
+      <path d="M-3-3 0 0 3-3M0 0V4M-2 2H2"/>
+    </g>
+    <g id="rune-marks">
+      <use xlink:href="#rune-a" transform="rotate(0 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-c" transform="rotate(15 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-b" transform="rotate(30 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-d" transform="rotate(45 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-c" transform="rotate(60 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-a" transform="rotate(75 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-d" transform="rotate(90 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-b" transform="rotate(105 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-a" transform="rotate(120 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-c" transform="rotate(135 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-b" transform="rotate(150 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-d" transform="rotate(165 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-b" transform="rotate(180 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-a" transform="rotate(195 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-d" transform="rotate(210 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-c" transform="rotate(225 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-a" transform="rotate(240 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-b" transform="rotate(255 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-c" transform="rotate(270 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-d" transform="rotate(285 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-b" transform="rotate(300 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-a" transform="rotate(315 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-d" transform="rotate(330 128 128) translate(128 34)"/>
+      <use xlink:href="#rune-c" transform="rotate(345 128 128) translate(128 34)"/>
+    </g>
+    <filter id="sea-grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence baseFrequency=".23" numOctaves="3" seed="23" type="fractalNoise" result="grain"/>
+      <feColorMatrix in="grain" type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope=".025"/>
+      </feComponentTransfer>
+      <feBlend in="SourceGraphic" mode="soft-light"/>
+    </filter>
+    <linearGradient id="land-color" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#16859a"/>
+      <stop offset=".55" stop-color="#117187"/>
+      <stop offset="1" stop-color="#0c5e76"/>
+    </linearGradient>
+    <pattern id="coastal-hatching" width="8" height="2.7" patternUnits="userSpaceOnUse">
+      <path d="M-.5 1.4Q2 .8 4 1.4T8.5 1.4" fill="none" stroke="#033d55" stroke-width=".6"/>
+    </pattern>
+    <path id="western-continent"
+      d="M80 32C84 29 88 32 90 35L97 37 101 41 99 46 96 47 98 52 103 54 102 62 99 66 102 71 108 76 106 83 110 87 108 92 103 96 105 102 102 109 105 116 100 121 101 129 98 135 102 143 99 153 102 162 99 168 100 177 96 182 99 189 96 198 97 205 93 208 94 216 90 222 87 229 84 228 81 221 77 218 73 218 69 214 66 219 61 220 59 226C55 232 49 232 46 228L40 230 35 225 34 216 37 208 39 202 37 196 34 193 36 187 40 183 41 177 37 170 37 162 33 157 31 149 31 141 34 134 38 127 37 118 41 112 43 108 42 101 39 98 39 93 36 92 35 86 38 83 44 84 49 89 52 85 51 81 54 76 54 70 57 66 56 61 57 54 57 49 61 45 66 43 67 39 72 38 75 34Z"/>
+    <path id="eastern-continent"
+      d="M217 3C223 2 229 7 229 15L227 21 230 28 226 34 227 39 223 44 222 51 218 55 219 61 215 66 209 69 207 76 204 77 206 82 203 87 203 93 200 99 202 104 199 110 201 116 205 122 208 130 207 138 203 144 201 152 198 157 201 163 198 169 197 176 193 180 194 187 189 192 187 199 181 202 178 208 175 209 173 217 169 220 169 227 165 231 161 227 160 221 162 215 158 211 159 204 155 199 149 196 147 190 151 183 151 176 155 169 155 162 159 156 158 150 164 142 166 136 164 131 169 124 171 118 167 113 167 109 172 105 177 101 180 95 179 90 174 88 170 94 167 99 164 99 160 94 160 88 154 85 153 80 150 75 150 68 146 63 146 58 149 54 149 48 153 46 157 48 161 44 168 47 174 44 181 43 186 39 190 37 193 31 199 29 204 24 207 18 208 10 212 8Z"/>
+    <g id="map-land">
+      <use xlink:href="#western-continent"/>
+      <use xlink:href="#eastern-continent"/>
+      <path d="M47 8 51 7 54 10 58 11 60 16 61 19 59 22 59 27 55 29 52 33 47 33 45 30 41 31 39 27 36 24 36 20 39 17 39 13 43 11Z"/>
+      <path d="M33 163 37 165 38 170 36 174 37 181 35 185 32 183 31 177 29 174 30 169ZM35 156 39 156 40 160 37 162 33 160Z"/>
+      <path d="M133 12 137 10 142 14 141 18 137 20 133 17ZM146 17 150 15 152 19 151 24 147 25 144 22ZM132 24 135 23 138 27 136 31 132 30ZM144 32 148 31 151 35 148 39 143 37Z"/>
+      <path d="M181 226 183 223 186 223 187 227 184 230 181 229ZM165 237 168 236 170 239 167 242 164 240Z"/>
+      <path d="M8 69 13 66 19 68 24 67 29 70 32 75 26 77 22 74 17 76 12 74 8 75Z"/>
+    </g>
+    <clipPath id="land-interior">
+      <use xlink:href="#western-continent"/>
+      <use xlink:href="#eastern-continent"/>
+    </clipPath>
+    <mask id="coastal-water">
+      <rect width="256" height="256" fill="#000"/>
+      <use xlink:href="#map-land" fill="none" stroke="#fff" stroke-width="10"/>
+      <use xlink:href="#map-land" fill="#000" stroke="#000" stroke-width="1.8"/>
+    </mask>
+    <g id="mountain" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-7 2-3-1 0-5 3-1 8 2M0-5 0-1 3 2M-9 5-5 3 0 4 4 3 9 5"/>
+    </g>
+    <g id="terrain" fill="none" stroke="#023f56" stroke-width=".75" stroke-linecap="round" stroke-linejoin="round">
+      <use xlink:href="#mountain" transform="translate(68 59) scale(.7)"/>
+      <use xlink:href="#mountain" transform="translate(82 69) scale(.8)"/>
+      <use xlink:href="#mountain" transform="translate(90 83) scale(.75)"/>
+      <use xlink:href="#mountain" transform="translate(74 86) scale(.75)"/>
+      <use xlink:href="#mountain" transform="translate(58 101)"/>
+      <use xlink:href="#mountain" transform="translate(60 111) scale(.9)"/>
+      <use xlink:href="#mountain" transform="translate(58 122) scale(.8)"/>
+      <use xlink:href="#mountain" transform="translate(57 133) scale(.85)"/>
+      <use xlink:href="#mountain" transform="translate(48 146) scale(.75)"/>
+      <use xlink:href="#mountain" transform="translate(58 156) scale(.8)"/>
+      <use xlink:href="#mountain" transform="translate(66 176) scale(.85)"/>
+      <use xlink:href="#mountain" transform="translate(65 186)"/>
+      <use xlink:href="#mountain" transform="translate(66 208)"/>
+      <use xlink:href="#mountain" transform="translate(45 211) scale(.8)"/>
+      <use xlink:href="#mountain" transform="translate(182 51) scale(.8)"/>
+      <use xlink:href="#mountain" transform="translate(199 45) scale(.75)"/>
+      <use xlink:href="#mountain" transform="translate(190 66)"/>
+      <use xlink:href="#mountain" transform="translate(190 79) scale(.85)"/>
+      <use xlink:href="#mountain" transform="translate(187 96) scale(.85)"/>
+      <use xlink:href="#mountain" transform="translate(176 124) scale(.8)"/>
+      <use xlink:href="#mountain" transform="translate(179 135) scale(.75)"/>
+      <use xlink:href="#mountain" transform="translate(179 166) scale(.9)"/>
+      <use xlink:href="#mountain" transform="translate(175 178) scale(.85)"/>
+      <use xlink:href="#mountain" transform="translate(167 190) scale(.85)"/>
+      <path d="M90 90Q86 103 90 118T84 146Q88 162 81 178"/>
+      <path d="M192 56 185 61 186 67 179 70 176 80 169 84M183 65 173 66 169 71"/>
+      <path d="M161 175 161 186 158 192 163 201 163 212 167 220"/>
+      <path d="M193 124 191 128 192 135 196 137 198 133 196 127ZM210 12C218 9 223 13 221 20L220 26 215 28 211 25 209 19Z" fill="#064b63"/>
+    </g>
+    <g id="cartography">
+      <rect width="256" height="256" fill="url(#coastal-hatching)" mask="url(#coastal-water)" opacity=".65"/>
+      <use xlink:href="#map-land" fill="url(#land-color)" stroke="#03455e" stroke-width="2.2" stroke-linejoin="round"/>
+      <use xlink:href="#map-land" fill="none" stroke="#509ca6" stroke-width=".6" opacity=".6"/>
+      <g clip-path="url(#land-interior)" opacity=".75">
+        <use xlink:href="#terrain"/>
+      </g>
+    </g>
+  </defs>
+
+  <g id="map" filter="url(#sea-grain)">
+    <rect width="256" height="256" fill="url(#sea)"/>
+    <use xlink:href="#cartography" opacity=".65"/>
+  </g>
+
+  <g id="emblem" transform="translate(128 128) scale(1.015) translate(-128 -128)">
+    <use xlink:href="#rim-form" transform="translate(1.5 2.2)" fill="#031d27" opacity=".9" filter="url(#cast-shadow)"/>
+    <circle cx="128" cy="128" r="88" fill="url(#disc)"/>
+    <g clip-path="url(#disc-clip)" opacity=".55">
+      <use xlink:href="#cartography"/>
+    </g>
+    <circle cx="128" cy="128" r="85" fill="none" stroke="#003042" stroke-width="4" opacity=".65" filter="url(#cast-shadow)"/>
+    <use id="compass" xlink:href="#rim-form" fill="url(#gold-face)" filter="url(#metal-grain)"/>
+    <circle cx="128" cy="128" r="100" fill="none" stroke="#463323" stroke-width="2"/>
+    <circle cx="128" cy="128" r="98.8" fill="none" stroke="url(#gold-edge)" stroke-width="1.5"/>
+    <circle cx="128" cy="128" r="89" fill="none" stroke="#705337" stroke-width="1.9"/>
+    <circle cx="128" cy="128" r="87.5" fill="none" stroke="url(#gold-edge)" stroke-width="1.4"/>
+    <circle cx="128" cy="128" r="85.7" fill="none" stroke="#4da5b1" stroke-width=".8" opacity=".75"/>
+
+    <g id="point-facets" stroke-linejoin="round">
+      <path d="M106 32 128 11V38Z" fill="#ebd2a9"/>
+      <path d="M128 11 150 32 128 38Z" fill="#96714a"/>
+      <path d="M106 224 128 221V245Z" fill="#ad8b5f"/>
+      <path d="M128 221 150 224 128 245Z" fill="#665039"/>
+      <path d="M128 8 103 32M128 8 153 32M128 248 103 224M128 248 153 224" fill="none" stroke="url(#gold-edge)" stroke-width="1.6"/>
+      <path d="M128 12V38M128 222V244" fill="none" stroke="#725235" stroke-width="1.2"/>
+      <path d="M43 54H64L43 77Z" fill="#e8d1ab"/>
+      <path d="M213 54H193L213 77Z" fill="#c2a171"/>
+      <path d="M43 205H64L43 182Z" fill="#9c7e54"/>
+      <path d="M213 205H193L213 182Z" fill="#73593b"/>
+      <path d="M43 76V54H64M194 54H213V76M43 183V205H64M194 205H213V183" fill="none" stroke="url(#gold-edge)" stroke-width="1.5"/>
+      <path d="M44 55 57 68M212 55 199 68M44 204 57 191M212 204 199 191" fill="none" stroke="#765837" stroke-width="1.2"/>
+    </g>
+
+    <g id="engraving" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <use xlink:href="#rune-marks" transform="translate(.45 .6)" stroke="#f0d8ae" stroke-width="1.4" opacity=".75"/>
+      <use xlink:href="#rune-marks" stroke="#65492f" stroke-width="1.1" opacity=".9"/>
+    </g>
+
+    <g id="monogram" stroke-linejoin="round">
+      <use xlink:href="#letterforms" transform="translate(2.2 3.3)" fill="#001b2c" stroke="#001b2c" stroke-width="3" opacity=".9" filter="url(#cast-shadow)"/>
+      <use xlink:href="#letterforms" transform="translate(.6 1.9)" fill="#9c8158" stroke="#443e31" stroke-width="2.8"/>
+      <use xlink:href="#letterforms" fill="url(#ivory-face)" stroke="url(#ivory-edge)" stroke-width="2.2"/>
+      <use xlink:href="#letterforms" fill="#fffceb" mask="url(#letter-highlight)" opacity=".95"/>
+      <use xlink:href="#letterforms" fill="#a48a62" mask="url(#letter-shade)" opacity=".6"/>
+    </g>
+  </g>
+</svg>
