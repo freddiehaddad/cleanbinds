@@ -3,6 +3,7 @@
 ## Notes: Customize keybinding labels on Blizzard action bars.
 ## Version: 0.1.0
 ## SavedVariables: CleanBindsDB
+## SavedVariablesPerCharacter: CleanBindsCharacterDB
 
 Locale.lua
 Bars.lua

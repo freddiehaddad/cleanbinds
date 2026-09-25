@@ -18,6 +18,7 @@ for number, definition in ipairs(normalBars) do
     addon.Bars[#addon.Bars + 1] = {
         id = "actionbar" .. number,
         frameName = definition[1],
+        buttonNamePrefix = number == 1 and "ActionButton" or definition[1] .. "Button",
         bindingPrefix = definition[2],
         buttonCount = 12,
         nameKey = number == 1 and "BINDING_HEADER_ACTIONBAR" or "BINDING_HEADER_ACTIONBAR" .. number,
@@ -37,6 +38,7 @@ local specialBars = {
     {
         id = "pet",
         frameName = "PetActionBar",
+        buttonNamePrefix = "PetActionButton",
         bindingPrefix = "BONUSACTIONBUTTON",
         buttonCount = 10,
         nameKey = "HUD_EDIT_MODE_PET_ACTION_BAR_LABEL",
@@ -45,6 +47,7 @@ local specialBars = {
     {
         id = "stance",
         frameName = "StanceBar",
+        buttonNamePrefix = "StanceButton",
         bindingPrefix = "SHAPESHIFTBUTTON",
         buttonCount = 10,
         nameKey = "HUD_EDIT_MODE_STANCE_BAR_LABEL",
@@ -66,11 +69,10 @@ function addon.GetBarButton(bar, index)
         return nil
     end
 
-    if bar.buttonNamePrefix then
-        return _G[bar.buttonNamePrefix .. index]
+    if frame.actionButtons then
+        return frame.actionButtons[index]
     end
-
-    return frame.actionButtons and frame.actionButtons[index]
+    return bar.buttonNamePrefix and _G[bar.buttonNamePrefix .. index]
 end
 
 function addon.CountBarButtons(bar)
@@ -98,9 +100,54 @@ function addon.GetBindingInfo(bar, index)
     local command = bar.bindingPrefix .. index
     local context = C_KeyBindings.GetBindingContextForAction(command)
     local keys = { GetBindingKey(command, nil, context) }
-    local button = addon.GetBarButton(bar, index)
-    if not keys[1] and button then
-        keys = { GetBindingKey("CLICK " .. button:GetName() .. ":LeftButton", nil, context) }
+    if not keys[1] then
+        keys = { GetBindingKey("CLICK " .. bar.buttonNamePrefix .. index .. ":LeftButton", nil, context) }
     end
     return command, keys
+end
+
+function addon.GetBindingSnapshot(bar, index)
+    local command, displayed = addon.GetBindingInfo(bar, index)
+    local bindingIndex = C_KeyBindings.GetBindingIndex(command)
+    if not bindingIndex then
+        return nil, L.BINDING_UNAVAILABLE
+    end
+
+    local result = { GetBinding(bindingIndex, true) }
+    if result[1] ~= command then
+        return nil, L.BINDING_UNAVAILABLE
+    end
+    local snapshot = {
+        command = command,
+        context = C_KeyBindings.GetBindingContextForAction(command) or 0,
+        keyboard = false,
+        gamepad = false,
+        device = displayed[1] and IsBindingForGamePad(displayed[1]) and "gamepad" or "keyboard",
+    }
+    local function IncludeKey(key)
+        if type(key) ~= "string" or key == "" then
+            return false
+        end
+        local device = IsBindingForGamePad(key) and "gamepad" or "keyboard"
+        if snapshot[device] == false then
+            snapshot[device] = key
+        end
+        return true
+    end
+    for offset = 3, #result do
+        if not IncludeKey(result[offset]) then
+            return nil, L.BINDING_UNAVAILABLE
+        end
+    end
+
+    local fallback = { GetBindingKey("CLICK " .. bar.buttonNamePrefix .. index .. ":LeftButton", nil, snapshot.context) }
+    for _, key in ipairs(fallback) do
+        if not IncludeKey(key) then
+            return nil, L.BINDING_UNAVAILABLE
+        end
+    end
+    if not displayed[1] and snapshot.keyboard == false and snapshot.gamepad ~= false then
+        snapshot.device = "gamepad"
+    end
+    return snapshot
 end

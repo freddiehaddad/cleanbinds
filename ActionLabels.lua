@@ -37,7 +37,7 @@ local function Apply(record)
     end
 
     local _, keys = addon.GetBindingInfo(record.bar, record.index)
-    local label = addon.db.enabled and keys[1] and addon.GetLabel(record.bar, record.index)
+    local label = addon.IsEnabled() and keys[1] and addon.GetLabel(record.bar, record.index)
     local blankNativeText = record.nativeText == nil or record.nativeText == ""
     if blankNativeText and not record.allowBlank then
         label = nil

@@ -11,15 +11,27 @@ for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editab
 label previews, keyboard navigation, reset confirmation, and combat read-only
 behavior.
 
-**Labels and settings are saved account-wide across characters.** Edits update
-the settings table, preview, and real action buttons. Actual keybindings are
-never changed by the addon.
+**Labels automatically follow WoW's account-wide or character-specific
+keybindings.** Edits update the preview and real action buttons. CleanBinds
+never changes your keybindings or selects a binding mode for you.
 
 ## Saved settings
 
-Labels and the **Enable custom labels** setting are shared by all characters on
-the same WoW account. Changes are saved automatically when you reload the UI or
-log out.
+CleanBinds follows **Character Specific Key Bindings** in WoW's Keybindings
+options. The current scope is shown at the top of each CleanBinds page.
+
+| WoW binding mode | CleanBinds labels and enable setting |
+| --- | --- |
+| Account-wide | Shared by characters using account-wide bindings. |
+| Character-specific | Independent settings for the current character. |
+
+The first time a character uses its own setup, it starts with native labels,
+not copies of the shared overrides. **Enable custom labels** initially matches
+the account setting, then remembers that character's choice independently.
+
+Switching modes recalls each setup's labels and enable state. For example, a
+button can have `MWD` in the shared setup and `Q` in a character's setup.
+Changes are saved automatically when you reload the UI or log out.
 
 ## Installation
 
@@ -49,11 +61,16 @@ native button and font proportions. Labels that are too wide receive a warning
 but can still be saved.
 
 Use **Reset This Bar** to clear one bar's overrides, or **Reset All Labels** on
-the parent page to clear every override. Both affect all characters and require
-confirmation. Turning off **Enable custom labels** restores native text without
-discarding your labels; this setting is also shared across characters.
+the parent page to clear every override **in the displayed scope**. Both require
+confirmation and leave the other setup untouched. An account-wide reset affects
+the shared labels, not independent character labels.
 
-Use `/cleanbinds status` to see the client version and available action bars.
+Turning off **Enable custom labels** restores native text without discarding
+labels in that setup. If the binding scope changes while you are editing or
+confirming a reset, the unfinished operation is canceled to protect both setups.
+
+Use `/cleanbinds status` to see the client version, active scope, and available
+action bars.
 
 ## Supported bars
 
@@ -69,7 +86,7 @@ no separate settings page and inherit those buttons' labels. Vehicle/override
 support is experimental.
 
 Third-party action bars, extra-action/totem/flyout buttons, appearance controls,
-profiles, and other WoW clients are not supported.
+manually managed profiles, and other WoW clients are not supported.
 
 ## Label behavior
 
@@ -77,11 +94,15 @@ Labels belong to individual buttons, not spells or globally renamed keys. Empty
 or whitespace-only labels restore the default. Long labels are allowed with a
 fit warning; text is preserved as UTF-8 and displayed literally.
 
-A committed change to a button's displayed binding clears its label for **all
-characters**. Secondary-only changes keep the label when the displayed key is
-unchanged. Canceled binding edits, loading binding sets, switching characters,
-and changing input devices do not clear labels. An override prepared for an
-unbound button becomes active on its first binding.
+A saved change to a button's displayed binding clears its label **only in that
+binding setup**. A stale label is also removed when its key changed while the
+setup or addon was inactive. For example, `MWD` is cleared if its button is now
+bound to F.
+
+Secondary-only changes keep the label when the displayed key is unchanged.
+Simply switching scopes or characters does not erase labels for unchanged
+bindings. Canceled binding edits and input-device changes also preserve them.
+An override prepared for an unbound button becomes active on its first binding.
 
 Custom labels preserve the game's fonts, colors, positioning, and visibility.
 Clearing an override or disabling custom labels restores the latest native text.

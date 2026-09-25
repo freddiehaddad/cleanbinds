@@ -1,6 +1,27 @@
 local passed = 0
 local unpackValues = unpack or table.unpack
 
+local function copyTable(value)
+    if type(value) ~= "table" then
+        return value
+    end
+    local result = {}
+    for key, entry in pairs(value) do
+        result[key] = copyTable(entry)
+    end
+    return result
+end
+
+local function bindingSnapshot(command, keyboard, gamepad, device)
+    return {
+        command = command,
+        context = 0,
+        keyboard = keyboard or false,
+        gamepad = gamepad or false,
+        device = device or "keyboard",
+    }
+end
+
 local function equal(actual, expected)
     assert(actual == expected, ("expected %s, got %s"):format(tostring(expected), tostring(actual)))
 end
@@ -19,16 +40,34 @@ local function loadAddon(options)
     local timers = {}
     local game = {
         bindings = options.bindings or {},
-        bindingSet = 1,
+        bindingSet = options.bindingSet or 1,
+        savedBindings = options.savedBindings or {},
         combat = false,
     }
+    game.savedBindings[game.bindingSet] = copyTable(game.bindings)
     local environment = setmetatable({}, { __index = _G })
     environment._G = environment
     environment.CleanBindsDB = options.database
+    environment.CleanBindsCharacterDB = options.characterDatabase
     environment.SlashCmdList = {}
     environment.Settings = {}
-    environment.Enum = { BindingSet = { Default = 0, Account = 1, Character = 2 } }
+    environment.Enum = { BindingSet = { Default = 0, Account = 1, Character = 2, Current = 3 } }
     environment.C_KeyBindings = { GetBindingContextForAction = function() end }
+    local bindingCommands, bindingIndices = {}, {}
+    environment.C_KeyBindings.GetBindingIndex = function(command)
+        if game.unavailableBinding == command then
+            return nil
+        end
+        return bindingIndices[command]
+    end
+    environment.GetBinding = function(index, includeGamepad)
+        assert(includeGamepad == true)
+        local command = bindingCommands[index]
+        return command, "BINDING_HEADER_ACTIONBAR", unpackValues(game.bindings[command] or {})
+    end
+    environment.IsBindingForGamePad = function(key)
+        return key:match("PAD") ~= nil
+    end
     environment.RANGE_INDICATOR = "*"
     environment.issecretvalue = function(value)
         return type(value) == "table" and value.secret == true
@@ -49,7 +88,8 @@ local function loadAddon(options)
     end
 
     environment.GetBindingKey = function(command)
-        return unpackValues(game.bindings[command] or {})
+        local displayed = game.displayedBindings and game.displayedBindings[command]
+        return unpackValues(displayed or game.bindings[command] or {})
     end
     environment.GetBindingName = function(command)
         return command
@@ -89,7 +129,7 @@ local function loadAddon(options)
 
     for _, name in ipairs({
         "RegisterAddOnCategory", "RegisterVerticalLayoutCategory",
-        "RegisterCanvasLayoutSubcategory", "RegisterAddOnSetting",
+        "RegisterCanvasLayoutSubcategory", "RegisterProxySetting",
         "CreateCheckbox", "OpenToCategory",
     }) do
         environment.Settings[name] = function()
@@ -133,6 +173,13 @@ local function loadAddon(options)
             chunk = assert(loadfile(path, "t", environment))
         end
         chunk("CleanBinds", addon)
+    end
+    for _, bar in ipairs(addon.Bars) do
+        for index = 1, bar.buttonCount do
+            local command = bar.bindingPrefix .. index
+            bindingCommands[#bindingCommands + 1] = command
+            bindingIndices[command] = #bindingCommands
+        end
     end
     if options.setup then
         options.setup(environment, game)
@@ -178,14 +225,24 @@ local function loadAddon(options)
 
     function game.Save(selectedSet)
         game.bindingSet = selectedSet or game.bindingSet
+        game.savedBindings[game.bindingSet] = copyTable(game.bindings)
         fire("UPDATE_BINDINGS")
         callHooks("SaveBindings", game.bindingSet)
     end
 
     function game.Load(selectedSet, bindings)
-        game.bindings = bindings
+        local source = selectedSet == 3 and game.bindingSet or selectedSet
+        game.bindings = copyTable(bindings or game.savedBindings[source] or game.bindings)
         fire("BINDINGS_LOADED")
         callHooks("LoadBindings", selectedSet)
+    end
+
+    function game.Switch(selectedSet)
+        if selectedSet == 2 then
+            game.Save(1)
+        end
+        game.Load(selectedSet)
+        game.Save(selectedSet)
     end
 
     function game.Flush()
@@ -213,6 +270,8 @@ test("initializes fresh account data after login", function()
     equal(addon.db.schemaVersion, 1)
     equal(addon.db.enabled, true)
     equal(next(addon.db.overrides), nil)
+    equal(next(addon.db.bindingSnapshots), nil)
+    equal(env.CleanBindsCharacterDB, nil)
     equal(#messages, 0)
 end)
 
@@ -227,6 +286,7 @@ test("preserves existing account data", function()
         schemaVersion = 1,
         enabled = false,
         overrides = { ["actionbar2:1"] = "MWD" },
+        bindingSnapshots = { ["actionbar2:1"] = bindingSnapshot("MULTIACTIONBAR1BUTTON1") },
         retainedField = "keep",
     }
     local env, addon, fire = loadAddon({ database = existing, loggedIn = true })
@@ -243,9 +303,11 @@ test("rejects malformed or unknown data without replacing it", function()
         false,
         "invalid",
         {},
-        { schemaVersion = 2, enabled = true, overrides = {} },
-        { schemaVersion = 1, enabled = "true", overrides = {} },
-        { schemaVersion = 1, enabled = true, overrides = false },
+        { schemaVersion = 1, enabled = true, overrides = {} },
+        { schemaVersion = 2, enabled = true, overrides = {}, bindingSnapshots = {} },
+        { schemaVersion = 1, enabled = "true", overrides = {}, bindingSnapshots = {} },
+        { schemaVersion = 1, enabled = true, overrides = false, bindingSnapshots = {} },
+        { schemaVersion = 1, enabled = true, overrides = {}, bindingSnapshots = false },
     }) do
         local env, addon, fire, messages = loadAddon({ database = existing, loggedIn = true })
         fire("ADDON_LOADED", "CleanBinds")
@@ -363,11 +425,11 @@ local function ready(options)
     return env, addon, fire, messages, game
 end
 
-local function readySettings()
+local function readySettings(options)
     local pages = {}
-    local env, addon, fire, messages, game = ready({
+    local settingsOptions = {
         settings = true,
-        setup = function(environment)
+        setup = function(environment, game)
             local function noop() end
             local createFrame = environment.CreateFrame
             local function widget(frameType, name, parent, template)
@@ -478,6 +540,7 @@ local function readySettings()
             local initializer = {
                 AddModifyPredicate = noop,
                 AddEvaluateStateFrameEvent = noop,
+                AddEvaluateStateCVar = noop,
                 SetValueChangedCallback = noop,
             }
             environment.Settings.VarType = { Boolean = "boolean" }
@@ -489,14 +552,44 @@ local function readySettings()
                 return {}
             end
             environment.Settings.RegisterAddOnCategory = noop
-            environment.Settings.RegisterAddOnSetting = function() return initializer end
+            environment.Settings.RegisterProxySetting = function(_, _, _, _, _, getter, setter)
+                local setting = { updates = 0, writes = 0 }
+                function setting:GetValue()
+                    return getter()
+                end
+                function setting:SetValue(value)
+                    self.writes = self.writes + 1
+                    setter(value)
+                end
+                function setting:NotifyUpdate()
+                    self.updates = self.updates + 1
+                    self.displayedValue = getter()
+                end
+                game.enabledSetting = setting
+                return setting
+            end
             environment.Settings.CreateCheckbox = function() return initializer end
-            environment.Settings.CreateElementInitializer = function() return initializer end
+            environment.Settings.CreateElementInitializer = function(_, data)
+                game.description = data.text
+                return initializer
+            end
             environment.CreateSettingsButtonInitializer = function() return initializer end
             environment.StaticPopupDialogs = {}
+            environment.StaticPopup_Show = function(which, text, _, data)
+                game.popup = { which = which, text = text, data = data }
+            end
+            environment.StaticPopup_Hide = function(which)
+                if game.popup and game.popup.which == which then
+                    game.popup = nil
+                end
+            end
             environment.GameTooltip = { Hide = noop }
         end,
-    })
+    }
+    for key, value in pairs(options or {}) do
+        settingsOptions[key] = value
+    end
+    local env, addon, fire, messages, game = ready(settingsOptions)
     return env, addon, fire, pages, messages, game
 end
 
@@ -603,16 +696,15 @@ test("Escape and combat cancel drafts before subsequent outside clicks", functio
 end)
 
 local function snapshotDatabase(db)
-    local snapshot = { schemaVersion = db.schemaVersion, enabled = db.enabled, overrides = {} }
-    for id, label in pairs(db.overrides) do
-        snapshot.overrides[id] = label
-    end
-    return snapshot
+    return copyTable(db)
 end
 
 test("initializes saved data loaded after addon files but before login", function()
     local env, addon, fire = loadAddon()
-    local saved = { schemaVersion = 1, enabled = false, overrides = { ["stance:1"] = "Form" } }
+    local saved = {
+        schemaVersion = 1, enabled = false, overrides = { ["stance:1"] = "Form" },
+        bindingSnapshots = { ["stance:1"] = bindingSnapshot("SHAPESHIFTBUTTON1") },
+    }
     env.CleanBindsDB = saved
     fire("ADDON_LOADED", "CleanBinds")
     equal(addon.state, "loading")
@@ -653,7 +745,7 @@ test("restores independent labels when the client supplies saved data", function
     equal(addon.GetLabel(addon.Bars[2], 1), "Different")
     local _, other, _, messages, game = ready({
         database = snapshotDatabase(env.CleanBindsDB),
-        bindings = { ACTIONBUTTON1 = { "F" } },
+        bindings = { ACTIONBUTTON1 = { "MOUSEWHEELDOWN" } },
     })
     game.Save()
     equal(other.GetLabel(other.Bars[1], 1), "MWD")
@@ -697,6 +789,7 @@ test("preserves invalid saved entries until explicitly reset", function()
     local db = {
         schemaVersion = 1, enabled = true,
         overrides = { ["actionbar1:1"] = false, ["actionbar1:2"] = "OK", ["unknown:1"] = "Keep" },
+        bindingSnapshots = { ["actionbar1:2"] = bindingSnapshot("ACTIONBUTTON2") },
     }
     local _, addon, _, messages = ready({ database = db })
     equal(addon.GetLabel(addon.Bars[1], 1), nil)
@@ -768,16 +861,19 @@ test("canceled binding edits do not erase shared labels", function()
     equal(addon.GetLabel(addon.Bars[1], 1), "Original")
 end)
 
-test("loading and saving another binding set establishes a baseline", function()
-    local _, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+test("loading and saving another binding set selects independent labels", function()
+    local env, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
     assert(addon.SetLabel(addon.Bars[1], 1, "Shared"))
     game.Load(2, { ACTIONBUTTON1 = { "G" } })
     game.Save(2)
     game.Flush()
-    equal(addon.GetLabel(addon.Bars[1], 1), "Shared")
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Shared")
+    assert(addon.SetLabel(addon.Bars[1], 1, "Character"))
     game.SetKeys("ACTIONBUTTON1", { "H" })
     game.Save()
     equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Shared")
 end)
 
 test("first binding activates a dormant label but later rebind clears it", function()
@@ -854,14 +950,16 @@ test("click-binding fallbacks participate in clearing", function()
     equal(addon.GetLabel(addon.Bars[1], 1), nil)
 end)
 
-test("unobserved client loads never look like user rebinding", function()
-    local _, addon, fire, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+test("unobserved client loads preserve uncertain labels without applying them", function()
+    local env, addon, fire, messages, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
     assert(addon.SetLabel(addon.Bars[1], 1, "Keep"))
     game.bindings = { ACTIONBUTTON1 = { "G" } }
     fire("BINDINGS_LOADED")
     game.Save()
     game.Flush()
-    equal(addon.GetLabel(addon.Bars[1], 1), "Keep")
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Keep")
+    assert(messages[1]:find("could not be verified", 1, true))
 end)
 
 test("invalid edits and combat cannot mutate label data", function()
@@ -1195,6 +1293,397 @@ test("forbidden action buttons are never hooked or rewritten", function()
     equal(button.HotKey.writes, 0)
     equal(next(button.scripts), nil)
     equal(#messages, 1)
+end)
+
+test("character profiles start empty and inherit enabled only once", function()
+    local env, addon, _, _, game = ready()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    assert(addon.SetEnabled(false))
+    equal(env.CleanBindsCharacterDB, nil)
+    game.Switch(2)
+    equal(addon.db, env.CleanBindsCharacterDB)
+    equal(addon.db.enabled, false)
+    equal(next(addon.db.overrides), nil)
+    equal(next(addon.db.bindingSnapshots), nil)
+    assert(addon.SetLabel(addon.Bars[1], 1, "Character"))
+    assert(addon.SetEnabled(true))
+    game.Switch(1)
+    equal(addon.db, env.CleanBindsDB)
+    equal(addon.IsEnabled(), false)
+    equal(addon.GetLabel(addon.Bars[1], 1), "Account")
+    game.Switch(2)
+    equal(addon.IsEnabled(), true)
+    equal(addon.GetLabel(addon.Bars[1], 1), "Character")
+    assert(env.CleanBindsDB.overrides ~= env.CleanBindsCharacterDB.overrides)
+    assert(env.CleanBindsDB.bindingSnapshots ~= env.CleanBindsCharacterDB.bindingSnapshots)
+end)
+
+test("an empty reset character profile is never reseeded", function()
+    local env, addon, _, _, game = ready()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Shared"))
+    game.Switch(2)
+    assert(addon.SetEnabled(false))
+    assert(addon.SetLabel(addon.Bars[1], 1, "Local"))
+    assert(addon.ResetLabels())
+    game.Switch(1)
+    assert(addon.SetEnabled(true))
+    game.Switch(2)
+    equal(addon.IsEnabled(), false)
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Shared")
+    equal(next(env.CleanBindsCharacterDB.bindingSnapshots), nil)
+end)
+
+test("startup directly in character scope uses only its native saved table", function()
+    local account = { schemaVersion = 1, enabled = false, overrides = {}, bindingSnapshots = {} }
+    local env, addon = ready({ database = account, bindingSet = 2 })
+    equal(addon.db, env.CleanBindsCharacterDB)
+    equal(addon.IsEnabled(), false)
+    assert(addon.SetLabel(addon.Bars[9], 1, "Pet"))
+    equal(next(account.overrides), nil)
+end)
+
+test("two characters share account data but retain independent profiles", function()
+    local envA, addonA, _, _, gameA = ready()
+    assert(addonA.SetLabel(addonA.Bars[1], 1, "Shared"))
+    gameA.Switch(2)
+    assert(addonA.SetLabel(addonA.Bars[1], 1, "Character A"))
+    assert(addonA.SetEnabled(false))
+
+    local envB, addonB, _, _, gameB = ready({ database = snapshotDatabase(envA.CleanBindsDB) })
+    equal(addonB.GetLabel(addonB.Bars[1], 1), "Shared")
+    equal(envB.CleanBindsCharacterDB, nil)
+    gameB.Switch(2)
+    equal(addonB.GetLabel(addonB.Bars[1], 1), nil)
+    assert(addonB.SetLabel(addonB.Bars[1], 1, "Character B"))
+    local _, restored = ready({
+        database = snapshotDatabase(envB.CleanBindsDB),
+        characterDatabase = snapshotDatabase(envA.CleanBindsCharacterDB),
+        bindingSet = 2,
+    })
+    equal(restored.GetLabel(restored.Bars[1], 1), "Character A")
+    equal(restored.IsEnabled(), false)
+    equal(envB.CleanBindsCharacterDB.overrides["actionbar1:1"], "Character B")
+end)
+
+test("the load-save gap cannot write to the outgoing profile", function()
+    local env, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    local token = addon.GetScopeToken()
+    game.Load(2, { ACTIONBUTTON1 = { "G" } })
+    equal(game.bindingSet, 1)
+    equal(addon.CanEdit(), false)
+    equal(addon.IsEnabled(), false)
+    equal(addon.GetScopeNotice(), addon.L.SCOPE_LOADING)
+    equal(addon.SetLabel(addon.Bars[1], 1, "Wrong", token), false)
+    equal(addon.ResetLabels(nil, token), false)
+    equal(addon.SetEnabled(false, token), false)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+    equal(env.CleanBindsCharacterDB, nil)
+    game.Save(2)
+    game.Flush()
+    equal(addon.GetScopeNotice(), addon.L.CHARACTER_NOTICE)
+    equal(next(addon.db.overrides), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+end)
+
+test("canceled scope loads retain both profile data and the saved scope", function()
+    local env, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    game.Load(2, { ACTIONBUTTON1 = { "G" } })
+    game.Load(1, { ACTIONBUTTON1 = { "F" } })
+    game.Flush()
+    equal(addon.db, env.CleanBindsDB)
+    equal(addon.GetLabel(addon.Bars[1], 1), "Account")
+    equal(env.CleanBindsCharacterDB, nil)
+end)
+
+test("saving outgoing edits does not compare them against incoming bindings", function()
+    local env, addon, _, _, game = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        savedBindings = { [2] = { ACTIONBUTTON1 = { "H" } } },
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Old"))
+    game.SetKeys("ACTIONBUTTON1", { "G" })
+    game.Switch(2)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], nil)
+    equal(next(env.CleanBindsCharacterDB.overrides), nil)
+    equal(game.bindings.ACTIONBUTTON1[1], "H")
+end)
+
+test("stale labels are cleared within their profile after an offline change", function()
+    local env, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" }, ACTIONBUTTON2 = { "G", "H" } },
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Stale"))
+    assert(addon.SetLabel(addon.Bars[1], 2, "Keep"))
+    local _, restored, _, messages = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
+        bindings = { ACTIONBUTTON1 = { "J" }, ACTIONBUTTON2 = { "G", "K" } },
+    })
+    equal(restored.GetLabel(restored.Bars[1], 1), nil)
+    equal(restored.db.bindingSnapshots["actionbar1:1"], nil)
+    equal(restored.GetLabel(restored.Bars[1], 2), "Keep")
+    equal(#messages, 1)
+    assert(messages[1]:find(restored.L.ACCOUNT_SCOPE, 1, true))
+end)
+
+test("returning to character scope clears only changed character labels", function()
+    local env, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    game.Switch(2)
+    assert(addon.SetLabel(addon.Bars[1], 1, "Character"))
+    game.Switch(1)
+    game.savedBindings[2] = { ACTIONBUTTON1 = { "G" } }
+    game.Switch(2)
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+    equal(env.CleanBindsCharacterDB.bindingSnapshots["actionbar1:1"], nil)
+end)
+
+test("canonical snapshots ignore display-only input preference changes after restart", function()
+    local env, addon = ready({ bindings = { ACTIONBUTTON1 = { "F", "PAD1" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Keep"))
+    local _, restored = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
+        bindings = { ACTIONBUTTON1 = { "F", "PAD1" } },
+        setup = function(_, game)
+            game.displayedBindings = { ACTIONBUTTON1 = { "PAD1", "F" } }
+        end,
+    })
+    equal(restored.GetLabel(restored.Bars[1], 1), "Keep")
+    equal(restored.db.bindingSnapshots["actionbar1:1"].device, "gamepad")
+end)
+
+test("an offline swap of primary and secondary keyboard keys invalidates the label", function()
+    local env, addon = ready({ bindings = { ACTIONBUTTON1 = { "F", "G" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "First"))
+    local _, restored = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
+        bindings = { ACTIONBUTTON1 = { "G", "F" } },
+    })
+    equal(restored.GetLabel(restored.Bars[1], 1), nil)
+end)
+
+test("click fallback snapshots remain valid when their frame is temporarily absent", function()
+    local env, addon = ready({ bindings = { ["CLICK ActionButton1:LeftButton"] = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Fallback"))
+    local _, restored = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
+        bindings = { ["CLICK ActionButton1:LeftButton"] = { "F" } },
+    })
+    equal(restored.GetLabel(restored.Bars[1], 1), "Fallback")
+end)
+
+test("missing canonical bindings cannot delete data or accept misleading metadata", function()
+    local env, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Keep"))
+    game.unavailableBinding = "ACTIONBUTTON1"
+    local success, reason = addon.SetLabel(addon.Bars[1], 1, "New")
+    equal(success, false)
+    equal(reason, addon.L.BINDING_UNAVAILABLE)
+    game.Save()
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Keep")
+    equal(env.CleanBindsDB.bindingSnapshots["actionbar1:1"].keyboard, "F")
+end)
+
+test("invalid binding metadata is preserved without applying the label", function()
+    local saved = {
+        schemaVersion = 1, enabled = true,
+        overrides = { ["actionbar1:1"] = "Missing", ["actionbar1:2"] = "Bad" },
+        bindingSnapshots = { ["actionbar1:2"] = { device = "keyboard" } },
+    }
+    local _, addon, _, messages = ready({ database = saved })
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(addon.GetLabel(addon.Bars[1], 2), nil)
+    equal(saved.overrides["actionbar1:1"], "Missing")
+    equal(saved.overrides["actionbar1:2"], "Bad")
+    assert(messages[1]:find("2 invalid", 1, true))
+end)
+
+test("an invalid character profile never falls back to account labels", function()
+    local env, addon, _, messages, game = ready({ characterDatabase = { schemaVersion = 99 } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    game.Switch(2)
+    equal(addon.db, nil)
+    equal(addon.CanEdit(), false)
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsCharacterDB.schemaVersion, 99)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+    assert(messages[#messages]:find("unsupported schema", 1, true))
+    game.Switch(1)
+    equal(addon.GetLabel(addon.Bars[1], 1), "Account")
+end)
+
+test("an unknown scope is reported without creating or resetting saved data", function()
+    local env, addon, fire, messages = loadAddon({ loggedIn = true, bindingSet = 99 })
+    fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.state, "failed")
+    equal(env.CleanBindsDB, nil)
+    equal(env.CleanBindsCharacterDB, nil)
+    assert(messages[1]:find("scope 99", 1, true))
+end)
+
+test("profile switches cancel drafts and update the native enable proxy without writes", function()
+    local env, addon, _, pages, messages, game = readySettings()
+    local page = pages[2]
+    page:Show()
+    game.enabledSetting:SetValue(false)
+    assert(addon.SetLabel(page.bar, 1, "Shared"))
+    page.rows[1].Override:OnClick()
+    page.rows[1].Editor:SetText("Wrong scope")
+    game.Switch(2)
+    equal(page.editingRow, nil)
+    equal(env.CleanBindsDB.overrides["actionbar2:1"], "Shared")
+    equal(next(env.CleanBindsCharacterDB.overrides), nil)
+    equal(game.enabledSetting:GetValue(), false)
+    equal(page.Description:GetText(), addon.L.CHARACTER_NOTICE)
+    assert(game.description():find(addon.L.CHARACTER_NOTICE, 1, true))
+    equal(game.enabledSetting.writes, 1)
+    assert(messages[1]:find(addon.L.SCOPE_CHANGED, 1, true))
+    game.enabledSetting:SetValue(true)
+    game.Switch(1)
+    equal(game.enabledSetting:GetValue(), false)
+    equal(game.enabledSetting.writes, 2)
+    equal(page.Description:GetText(), addon.L.ACCOUNT_NOTICE)
+end)
+
+test("stale reset confirmations cannot clear a new or revisited scope", function()
+    local env, addon, _, pages, _, game = readySettings()
+    local page = pages[1]
+    page:Show()
+    assert(addon.SetLabel(page.bar, 1, "Account"))
+    page.Reset:OnClick()
+    local stale = game.popup
+    assert(stale.text:find(addon.L.ACCOUNT_SCOPE, 1, true))
+    game.Switch(2)
+    equal(game.popup, nil)
+    assert(addon.SetLabel(page.bar, 1, "Character"))
+    env.StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET.OnAccept(nil, stale.data)
+    equal(addon.GetLabel(page.bar, 1), "Character")
+    game.Switch(1)
+    env.StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET.OnAccept(nil, stale.data)
+    equal(addon.GetLabel(page.bar, 1), "Account")
+end)
+
+test("scoped resets remove matching snapshots without touching the other setup", function()
+    local env, addon, _, _, game = ready()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    game.Switch(2)
+    assert(addon.SetLabel(addon.Bars[1], 1, "First"))
+    assert(addon.SetLabel(addon.Bars[2], 1, "Second"))
+    assert(addon.SetEnabled(false))
+    assert(addon.ResetLabels("actionbar1"))
+    equal(addon.db.bindingSnapshots["actionbar1:1"], nil)
+    equal(addon.GetLabel(addon.Bars[2], 1), "Second")
+    assert(addon.ResetLabels())
+    equal(next(addon.db.overrides), nil)
+    equal(next(addon.db.bindingSnapshots), nil)
+    equal(addon.IsEnabled(), false)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+end)
+
+test("switching profiles restores native text and reuses the existing rendering hooks", function()
+    local button = mockButton("ActionButton1", "F")
+    local _, addon, _, _, game = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    equal(button.HotKey:GetText(), "Account")
+    game.Switch(2)
+    equal(button.HotKey:GetText(), "F")
+    assert(addon.SetLabel(addon.Bars[1], 1, "Character"))
+    equal(button.HotKey:GetText(), "Character")
+    assert(addon.SetEnabled(false))
+    equal(button.HotKey:GetText(), "F")
+    game.Switch(1)
+    equal(button.HotKey:GetText(), "Account")
+    game.Switch(2)
+    equal(button.HotKey:GetText(), "F")
+    equal(#button.scripts.OnShow, 1)
+end)
+
+test("new keyboard binding replacing a gamepad display is a real binding change", function()
+    local _, addon, _, _, game = ready({ bindings = { ACTIONBUTTON1 = { "PAD1" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Pad"))
+    game.SetKeys("ACTIONBUTTON1", { "F", "PAD1" })
+    game.Save()
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+end)
+
+test("temporarily unavailable binding snapshots recover after their definitions load", function()
+    local saved = {
+        schemaVersion = 1, enabled = true, overrides = { ["actionbar1:1"] = "Keep" },
+        bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "F") },
+    }
+    local _, addon, fire, _, game = ready({
+        database = saved,
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(_, state)
+            state.unavailableBinding = "ACTIONBUTTON1"
+        end,
+    })
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(saved.overrides["actionbar1:1"], "Keep")
+    game.unavailableBinding = nil
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    equal(addon.GetLabel(addon.Bars[1], 1), "Keep")
+end)
+
+test("unknown binding-scope saves cannot mutate the previous profile", function()
+    local env, addon, _, _, game = ready()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+    game.Save(99)
+    equal(addon.IsEnabled(), false)
+    equal(addon.CanEdit(), false)
+    equal(addon.db, nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+    game.Load(1)
+    game.Save(1)
+    equal(addon.GetLabel(addon.Bars[1], 1), "Account")
+end)
+
+test("initializing an existing character profile does not read an invalid inactive account profile", function()
+    local account = { schemaVersion = 99 }
+    local character = {
+        schemaVersion = 1, enabled = true, overrides = { ["stance:1"] = "Form" },
+        bindingSnapshots = { ["stance:1"] = bindingSnapshot("SHAPESHIFTBUTTON1") },
+    }
+    local env, addon = ready({ bindingSet = 2, database = account, characterDatabase = character })
+    equal(addon.db, character)
+    equal(addon.GetLabel(addon.Bars[10], 1), "Form")
+    equal(env.CleanBindsDB, account)
+end)
+
+test("leaving either character setup restores native text when account labels are empty", function()
+    for _, customLabel in ipairs({ "CHAR", "PAL" }) do
+        local button = mockButton("ActionButton1", "Q")
+        local character = {
+            schemaVersion = 1, enabled = true,
+            overrides = { ["actionbar1:1"] = customLabel },
+            bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "Q") },
+        }
+        local env, addon, _, _, game = ready({
+            bindingSet = 2,
+            characterDatabase = character,
+            bindings = { ACTIONBUTTON1 = { "Q" } },
+            savedBindings = { [1] = { ACTIONBUTTON1 = { "Q" } } },
+            setup = function(environment)
+                environment.MainActionBar = { actionButtons = { button } }
+            end,
+        })
+        equal(button.HotKey:GetText(), customLabel)
+        game.Switch(1)
+        equal(addon.GetLabel(addon.Bars[1], 1), nil)
+        equal(button.HotKey:GetText(), "Q")
+        equal(env.CleanBindsCharacterDB.overrides["actionbar1:1"], customLabel)
+        equal(next(env.CleanBindsDB.overrides), nil)
+        game.Switch(2)
+        equal(button.HotKey:GetText(), customLabel)
+    end
 end)
 
 print(("%d tests passed"):format(passed))

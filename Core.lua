@@ -18,20 +18,23 @@ local function CheckCapabilities()
     end
 
     for _, name in ipairs({
-        "GetBindingKey", "GetBindingName", "GetBindingText", "GetCurrentBindingSet",
+        "GetBinding", "GetBindingKey", "GetBindingName", "GetBindingText", "GetCurrentBindingSet",
+        "IsBindingForGamePad",
         "SaveBindings", "LoadBindings", "SetBinding", "hooksecurefunc", "InCombatLockdown",
     }) do
         if type(_G[name]) ~= "function" then
             return L.MISSING_API:format(name)
         end
     end
-    if type(C_KeyBindings) ~= "table" or type(C_KeyBindings.GetBindingContextForAction) ~= "function" then
-        return L.MISSING_API:format("C_KeyBindings.GetBindingContextForAction")
+    for _, name in ipairs({ "GetBindingContextForAction", "GetBindingIndex" }) do
+        if type(C_KeyBindings) ~= "table" or type(C_KeyBindings[name]) ~= "function" then
+            return L.MISSING_API:format("C_KeyBindings." .. name)
+        end
     end
     if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
         return L.MISSING_API:format("C_Timer.After")
     end
-    for _, name in ipairs({ "Default", "Account", "Character" }) do
+    for _, name in ipairs({ "Default", "Account", "Character", "Current" }) do
         if type(Enum) ~= "table" or type(Enum.BindingSet) ~= "table"
             or type(Enum.BindingSet[name]) ~= "number" then
             return L.MISSING_API:format("Enum.BindingSet." .. name)
@@ -42,7 +45,7 @@ local function CheckCapabilities()
         "RegisterAddOnCategory",
         "RegisterVerticalLayoutCategory",
         "RegisterCanvasLayoutSubcategory",
-        "RegisterAddOnSetting",
+        "RegisterProxySetting",
         "CreateCheckbox",
         "OpenToCategory",
     }) do
@@ -52,16 +55,16 @@ local function CheckCapabilities()
     end
 end
 
-local function InitializeDatabase()
-    if CleanBindsDB == nil then
-        CleanBindsDB = {
-            schemaVersion = schemaVersion,
-            enabled = true,
-            overrides = {},
-        }
-    end
+local function NewProfile(enabled)
+    return {
+        schemaVersion = schemaVersion,
+        enabled = enabled,
+        overrides = {},
+        bindingSnapshots = {},
+    }
+end
 
-    local db = CleanBindsDB
+local function ValidateProfile(db)
     if type(db) ~= "table" then
         return nil, L.INVALID_DATABASE:format("expected a table")
     end
@@ -74,8 +77,30 @@ local function InitializeDatabase()
     if type(db.overrides) ~= "table" then
         return nil, L.INVALID_DATABASE:format("overrides must be a table")
     end
+    if type(db.bindingSnapshots) ~= "table" then
+        return nil, L.INVALID_DATABASE:format("bindingSnapshots must be a table")
+    end
 
     return db
+end
+
+function addon.GetProfile(scope)
+    if scope == Enum.BindingSet.Account then
+        if CleanBindsDB == nil then
+            CleanBindsDB = NewProfile(true)
+        end
+        return ValidateProfile(CleanBindsDB)
+    elseif scope == Enum.BindingSet.Character then
+        if CleanBindsCharacterDB == nil then
+            local account, reason = addon.GetProfile(Enum.BindingSet.Account)
+            if not account then
+                return nil, reason
+            end
+            CleanBindsCharacterDB = NewProfile(account.enabled)
+        end
+        return ValidateProfile(CleanBindsCharacterDB)
+    end
+    return nil, L.UNKNOWN_BINDING_SCOPE:format(tostring(scope))
 end
 
 local function Fail(message)
@@ -91,14 +116,12 @@ local function Initialize()
         return
     end
 
-    local db, databaseError = InitializeDatabase()
-    if not db then
+    local initialized, databaseError = addon.InitializeLabels()
+    if not initialized then
         Fail(databaseError)
         return
     end
 
-    addon.db = db
-    addon.InitializeLabels()
     addon.InitializeSettings()
     addon.InitializeActionLabels()
     addon.state = "ready"
@@ -115,7 +138,7 @@ function addon.PrintStatus()
     end
 
     addon.Print(L.READY:format(addon.build.version, addon.build.number, addon.build.interface))
-    addon.Print(L.ACCOUNT_NOTICE)
+    addon.Print(addon.GetScopeNotice())
     for _, bar in ipairs(addon.Bars) do
         local count = addon.CountBarButtons(bar)
         local name = addon.GetBarName(bar)

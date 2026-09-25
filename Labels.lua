@@ -1,9 +1,13 @@
 local _, addon = ...
 local L = addon.L
 local slots, bars = {}, {}
-local values, anchors, observed, edited = {}, {}, {}, {}
-local bindingSet
+local values = {}
+local unverified = {}
+local bindingSet, loadedSet, scopeError
+local scopeReady = false
+local scopeToken = 0
 local loadPending = false
+local loadSerial = 0
 
 local function LabelKey(bar, index)
     return bar.id .. ":" .. index
@@ -76,146 +80,292 @@ local function Notify()
     end
 end
 
-local function CaptureBindings()
-    local snapshot = {}
-    for id, slot in pairs(slots) do
-        local _, keys = addon.GetBindingInfo(slot.bar, slot.index)
-        snapshot[id] = keys
-    end
-    return snapshot
+local function IsKnownScope(scope)
+    return scope == Enum.BindingSet.Account or scope == Enum.BindingSet.Character
 end
 
-local function Contains(keys, key)
-    for _, candidate in ipairs(keys) do
-        if candidate == key then
-            return true
-        end
-    end
-    return false
+local function IsScopeReady()
+    return scopeReady and not loadPending and bindingSet == GetCurrentBindingSet()
 end
 
-local function SameKeys(left, right, ordered)
-    if #left ~= #right then
-        return false
+function addon.GetScopeName()
+    if bindingSet == Enum.BindingSet.Account then
+        return L.ACCOUNT_SCOPE
+    elseif bindingSet == Enum.BindingSet.Character then
+        return L.CHARACTER_SCOPE
     end
-    for index, key in ipairs(left) do
-        if (ordered and right[index] ~= key) or (not ordered and not Contains(right, key)) then
-            return false
-        end
+    return L.UNKNOWN_BINDING_SCOPE:format(tostring(bindingSet))
+end
+
+function addon.GetScopeNotice()
+    if scopeError then
+        return scopeError
+    elseif not IsScopeReady() then
+        return L.SCOPE_LOADING
+    end
+    return bindingSet == Enum.BindingSet.Account and L.ACCOUNT_NOTICE or L.CHARACTER_NOTICE
+end
+
+function addon.GetScopeToken()
+    return scopeToken
+end
+
+function addon.CanEdit(expectedToken)
+    if expectedToken ~= nil and expectedToken ~= scopeToken then
+        return false, L.SCOPE_CHANGED
+    elseif InCombatLockdown() then
+        return false, L.COMBAT_READ_ONLY
+    elseif scopeError then
+        return false, scopeError
+    elseif not IsScopeReady() then
+        return false, L.SCOPE_LOADING
     end
     return true
 end
 
-local function Rebase(snapshot, selectedSet)
-    observed = snapshot
-    edited = {}
-    anchors = {}
-    bindingSet = selectedSet or GetCurrentBindingSet()
-    for id in pairs(values) do
-        anchors[id] = snapshot[id]
+function addon.IsEnabled()
+    return IsScopeReady() and addon.db ~= nil and addon.db.enabled
+end
+
+local function InvalidateInteractions()
+    scopeToken = scopeToken + 1
+    if addon.CancelScopeInteractions then
+        addon.CancelScopeInteractions()
     end
 end
 
-local function ObserveEdit(key)
-    local current = CaptureBindings()
-    for id, keys in pairs(current) do
-        local previous = observed[id]
-        if not SameKeys(previous, keys, true)
-            and (key == nil or Contains(previous, key) or Contains(keys, key)) then
-            edited[id] = true
+local function ValidSnapshot(snapshot, slot)
+    local function ValidKey(key)
+        return key == false or (type(key) == "string" and key ~= "" and not key:find("%c"))
+    end
+    return type(snapshot) == "table"
+        and snapshot.command == slot.bar.bindingPrefix .. slot.index
+        and type(snapshot.context) == "number"
+        and snapshot.context >= 0 and snapshot.context % 1 == 0
+        and ValidKey(snapshot.keyboard) and ValidKey(snapshot.gamepad)
+        and (snapshot.device == "keyboard" or snapshot.device == "gamepad")
+end
+
+local function BindingChanged(before, after)
+    if before.keyboard == false and before.gamepad == false then
+        return false
+    end
+    return before.context ~= after.context or before[before.device] ~= after[before.device]
+        or (before.device ~= after.device and before[after.device] ~= after[after.device])
+end
+
+local function ReconcileProfile(preserveUncertain)
+    local cleared, skipped, unavailable = {}, 0, 0
+    values = {}
+    unverified = {}
+    for id, text in pairs(addon.db.overrides) do
+        local slot = slots[id]
+        local normalized = slot and addon.NormalizeLabel(text)
+        local before = addon.db.bindingSnapshots[id]
+        if not normalized or normalized == "" or not ValidSnapshot(before, slot) then
+            skipped = skipped + 1
+        else
+            local after = addon.GetBindingSnapshot(slot.bar, slot.index)
+            if not after or (preserveUncertain and BindingChanged(before, after)) then
+                unavailable = unavailable + 1
+                unverified[id] = normalized
+            elseif BindingChanged(before, after) then
+                addon.db.overrides[id] = nil
+                addon.db.bindingSnapshots[id] = nil
+                cleared[#cleared + 1] = slot
+            else
+                values[id] = normalized
+                addon.db.bindingSnapshots[id] = after
+            end
         end
     end
-    observed = current
+    local scopeName = addon.GetScopeName()
+    if skipped > 0 then
+        addon.Print(L.SKIPPED_LABELS:format(scopeName, skipped))
+    end
+    if unavailable > 0 then
+        addon.Print(L.SKIPPED_BINDINGS:format(scopeName, unavailable))
+    end
+    if #cleared == 1 then
+        local slot = cleared[1]
+        addon.Print(L.CLEARED_LABEL:format(GetBindingName(slot.bar.bindingPrefix .. slot.index), scopeName))
+    elseif #cleared > 1 then
+        addon.Print(L.CLEARED_LABELS:format(#cleared, scopeName))
+    end
+end
+
+local function ActivateScope(scope, preserveUncertain)
+    if scope ~= bindingSet or not scopeReady then
+        InvalidateInteractions()
+    end
+    bindingSet = scope
+    loadedSet = nil
+    scopeReady = false
+    values = {}
+    unverified = {}
+    local db, reason = addon.GetProfile(scope)
+    addon.db = db
+    scopeError = reason
+    if not db then
+        Notify()
+        return false, reason
+    end
+    ReconcileProfile(preserveUncertain)
+    scopeReady = true
+    Notify()
+    return true
+end
+
+local function ActivateAndReport(scope, preserveUncertain)
+    local success, reason = ActivateScope(scope, preserveUncertain)
+    if not success then
+        addon.Print(reason)
+    end
+end
+
+local function SuspendScope()
+    if scopeReady then
+        InvalidateInteractions()
+    end
+    scopeReady = false
+    Notify()
 end
 
 local function OnBindingsSaved()
-    local current = CaptureBindings()
-    local currentSet = GetCurrentBindingSet()
-    if loadPending or currentSet ~= bindingSet then
+    local current = GetCurrentBindingSet()
+    if loadPending then
         loadPending = false
-        Rebase(current, currentSet)
-        Notify()
-        return
-    end
-
-    local cleared = {}
-    for id in pairs(values) do
-        local before = anchors[id]
-        local after = current[id]
-        if before and before[1] and before[1] ~= after[1]
-            and (edited[id] or not SameKeys(before, after, false)) then
-            values[id] = nil
-            addon.db.overrides[id] = nil
-            cleared[#cleared + 1] = id
-        end
-    end
-    Rebase(current, currentSet)
-    Notify()
-    if #cleared == 1 then
-        local slot = slots[cleared[1]]
-        local name = GetBindingName(slot.bar.bindingPrefix .. slot.index)
-        addon.Print(L.CLEARED_LABEL:format(name))
-    elseif #cleared > 1 then
-        addon.Print(L.CLEARED_LABELS:format(#cleared))
+        ActivateAndReport(current, true)
+    elseif loadedSet and loadedSet ~= current then
+        SuspendScope()
+        addon.Print(L.SCOPE_LOADING)
+    else
+        ActivateAndReport(current)
     end
 end
 
-local function OnBindingsLoaded(selectedSet)
+local function OnBindingsLoaded(scope)
     loadPending = false
-    if selectedSet == Enum.BindingSet.Default then
-        ObserveEdit()
-    else
-        local knownSet = selectedSet == Enum.BindingSet.Account or selectedSet == Enum.BindingSet.Character
-        Rebase(CaptureBindings(), knownSet and selectedSet or nil)
+    if scope == Enum.BindingSet.Default then
+        -- Defaults are an uncommitted edit in the current scope, not another profile.
+        loadedSet = nil
+        Notify()
+        return
+    elseif scope == Enum.BindingSet.Current then
+        scope = GetCurrentBindingSet()
     end
-    Notify()
+
+    if not IsKnownScope(scope) then
+        ActivateAndReport(scope)
+    elseif scope == GetCurrentBindingSet() then
+        ActivateAndReport(scope)
+    else
+        loadedSet = scope
+        SuspendScope()
+    end
 end
 
 function addon.GetLabel(bar, index)
-    return values[LabelKey(bar, index)]
+    if IsScopeReady() then
+        return values[LabelKey(bar, index)]
+    end
 end
 
-function addon.SetLabel(bar, index, text)
-    if InCombatLockdown() then
-        return false, L.COMBAT_READ_ONLY
+function addon.SetLabel(bar, index, text, expectedToken)
+    local allowed, reason = addon.CanEdit(expectedToken)
+    if not allowed then
+        return false, reason
     end
-
     local id = LabelKey(bar, index)
     if not slots[id] then
         return false, L.INVALID_BUTTON
     end
-    local normalized, reason = addon.NormalizeLabel(text)
+    local normalized, validationError = addon.NormalizeLabel(text)
     if not normalized then
-        return false, reason
+        return false, validationError
     end
 
-    local _, keys = addon.GetBindingInfo(bar, index)
+    local snapshot
+    if normalized ~= "" then
+        snapshot, reason = addon.GetBindingSnapshot(bar, index)
+        if not snapshot then
+            return false, reason
+        end
+    end
     values[id] = normalized ~= "" and normalized or nil
+    unverified[id] = nil
     addon.db.overrides[id] = values[id]
-    -- An edit made after a pending rebind belongs to the new binding, not the old one.
-    anchors[id] = values[id] and keys or nil
-    edited[id] = nil
+    addon.db.bindingSnapshots[id] = snapshot
     Notify()
     return true
 end
 
-function addon.ResetLabels(barID)
-    if InCombatLockdown() then
-        return false, L.COMBAT_READ_ONLY
+function addon.SetEnabled(enabled, expectedToken)
+    local allowed, reason = addon.CanEdit(expectedToken)
+    if not allowed then
+        return false, reason
+    end
+    if type(enabled) ~= "boolean" then
+        return false, L.INVALID_DATABASE:format("enabled must be a boolean")
+    end
+    addon.db.enabled = enabled
+    Notify()
+    return true
+end
+
+function addon.ResetLabels(barID, expectedToken)
+    local allowed, reason = addon.CanEdit(expectedToken)
+    if not allowed then
+        return false, reason
     end
     if barID and not bars[barID] then
         return false, L.INVALID_BAR
     end
-    for id in pairs(addon.db.overrides) do
-        if not barID or (type(id) == "string" and id:sub(1, #barID + 1) == barID .. ":") then
-            addon.db.overrides[id] = nil
-            values[id] = nil
-            anchors[id] = nil
-            edited[id] = nil
+    for _, entries in ipairs({ addon.db.overrides, addon.db.bindingSnapshots, values, unverified }) do
+        for id in pairs(entries) do
+            if not barID or (type(id) == "string" and id:sub(1, #barID + 1) == barID .. ":") then
+                entries[id] = nil
+            end
         end
     end
     Notify()
     return true
+end
+
+local function OnInputDeviceChanged()
+    if not IsScopeReady() then
+        return
+    end
+    for id in pairs(values) do
+        local slot = slots[id]
+        local before = addon.db.bindingSnapshots[id]
+        local after = addon.GetBindingSnapshot(slot.bar, slot.index)
+        if after and before.context == after.context
+            and before.keyboard == after.keyboard and before.gamepad == after.gamepad then
+            before.device = after.device
+        end
+    end
+end
+
+local function RetryBindingReads()
+    if not IsScopeReady() then
+        return
+    end
+    local restored = false
+    for id, label in pairs(unverified) do
+        local slot = slots[id]
+        local before = addon.db.bindingSnapshots[id]
+        local after = addon.GetBindingSnapshot(slot.bar, slot.index)
+        if after and not BindingChanged(before, after) then
+            values[id] = label
+            unverified[id] = nil
+            addon.db.bindingSnapshots[id] = after
+            restored = true
+        end
+    end
+    if restored then
+        Notify()
+    end
 end
 
 function addon.InitializeLabels()
@@ -225,46 +375,35 @@ function addon.InitializeLabels()
             slots[LabelKey(bar, index)] = { bar = bar, index = index }
         end
     end
-
-    local skipped = 0
-    for id, text in pairs(addon.db.overrides) do
-        local normalized = slots[id] and addon.NormalizeLabel(text)
-        if normalized then
-            values[id] = normalized ~= "" and normalized or nil
-            addon.db.overrides[id] = values[id]
-        else
-            skipped = skipped + 1
-        end
+    local initialized, reason = ActivateScope(GetCurrentBindingSet())
+    if not initialized then
+        return false, reason
     end
-    if skipped > 0 then
-        addon.Print(L.SKIPPED_LABELS:format(skipped))
-    end
-    Rebase(CaptureBindings())
 
     hooksecurefunc("SaveBindings", OnBindingsSaved)
     hooksecurefunc("LoadBindings", OnBindingsLoaded)
-    for _, name in ipairs({ "SetBinding", "SetBindingClick", "SetBindingSpell", "SetBindingItem", "SetBindingMacro" }) do
-        if type(_G[name]) == "function" then
-            hooksecurefunc(name, ObserveEdit)
-        end
-    end
-
     local events = CreateFrame("Frame")
     events:RegisterEvent("BINDINGS_LOADED")
     events:RegisterEvent("GAME_PAD_ACTIVE_CHANGED")
+    events:RegisterEvent("ADDON_LOADED")
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
     events:SetScript("OnEvent", function(_, event)
         if event == "GAME_PAD_ACTIVE_CHANGED" then
-            observed = CaptureBindings()
-        else
+            OnInputDeviceChanged()
+        elseif event == "BINDINGS_LOADED" then
             loadPending = true
-            -- LoadBindings emits this synchronously, before its posthook supplies the load reason.
+            loadSerial = loadSerial + 1
+            local serial = loadSerial
+            -- The synchronous event precedes the LoadBindings posthook that identifies its target.
             C_Timer.After(0, function()
-                if loadPending then
+                if loadPending and loadSerial == serial then
                     loadPending = false
-                    Rebase(CaptureBindings())
-                    Notify()
+                    ActivateAndReport(GetCurrentBindingSet(), true)
                 end
             end)
+        else
+            RetryBindingReads()
         end
     end)
+    return true
 end
