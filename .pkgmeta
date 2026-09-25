@@ -1,0 +1,7 @@
+package-as: CleanBinds
+
+ignore:
+  - tests
+  - README.md
+  - Media/Icon.svg
+  - Media/Icon.png

@@ -1,10 +1,13 @@
-<img align="right" src="Media/Icon.svg" alt="Clean Binds emblem" width="96" height="96">
+<img align="right" src="https://raw.githubusercontent.com/freddiehaddad/cleanbinds/main/Media/Icon.png" alt="Clean Binds emblem" width="96" height="96">
 
 # Clean Binds
 
 Custom action-bar keybinding labels for World of Warcraft: Forever beta.
 Replace long names such as **Mouse Wheel Down** with **MWD** without changing
 your keybindings.
+
+[Download on Wago](https://addons.wago.io/addons/cleanbinds) |
+[GitHub releases](https://github.com/freddiehaddad/cleanbinds/releases)
 
 ## Features
 
@@ -37,13 +40,16 @@ Changes are saved automatically when you reload the UI or log out.
 
 ## Installation
 
-Place this directory at:
+Download the release ZIP from Wago or GitHub Releases, then place its extracted
+**CleanBinds** folder at:
 
 ```text
 C:\Program Files (x86)\World of Warcraft\_classic_beta_\Interface\AddOns\CleanBinds
 ```
 
 `CleanBinds.toc` must be directly inside that folder.
+On GitHub, choose the **CleanBinds-VERSION-forever.zip** release asset, not the
+automatically generated source-code archive.
 
 Restart WoW and enable **Clean Binds** in the AddOns list.
 
@@ -109,3 +115,9 @@ An override prepared for an unbound button becomes active on its first binding.
 Custom labels preserve the game's fonts, colors, positioning, and visibility.
 Clearing an override or disabling custom labels restores the latest native text.
 Settings are read-only during combat, but existing custom labels remain active.
+
+## Support and license
+
+[Report an issue](https://github.com/freddiehaddad/cleanbinds/issues).
+CleanBinds is distributed under the
+[MIT License](https://github.com/freddiehaddad/cleanbinds/blob/main/LICENSE).

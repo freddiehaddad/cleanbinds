@@ -1,0 +1,66 @@
+name: Package and release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check release tag and publishing configuration
+        env:
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+        run: |
+          python3 .github/scripts/validate-release.py "$GITHUB_REF_NAME"
+          if [[ -z "$WAGO_API_TOKEN" ]]; then
+            echo "::error::WAGO_API_TOKEN must be configured before publishing."
+            exit 1
+          fi
+
+      - name: Install Lua
+        run: |
+          if ! command -v lua5.1 >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends lua5.1
+          fi
+
+      - name: Run addon checks
+        run: lua5.1 tests/run.lua
+
+      - name: Build the release ZIP without uploading
+        uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
+        with:
+          args: -d -p 0 -w 0
+          pandoc: "false"
+        env:
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check the installable ZIP
+        run: python3 .github/scripts/validate-release.py "$GITHUB_REF_NAME" ".release/CleanBinds-${GITHUB_REF_NAME}-forever.zip"
+
+      - name: Publish the verified package to Wago and GitHub
+        uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
+        with:
+          args: -c -o -p 0 -w 0
+          pandoc: "false"
+        env:
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
