@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated version tag to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,10 +24,13 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Check out the release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -29,7 +38,7 @@ jobs:
         env:
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
         run: |
-          python3 .github/scripts/validate-release.py "$GITHUB_REF_NAME"
+          python3 .github/scripts/validate-release.py "$RELEASE_TAG"
           if [[ -z "$WAGO_API_TOKEN" ]]; then
             echo "::error::WAGO_API_TOKEN must be configured before publishing."
             exit 1
@@ -54,7 +63,7 @@ jobs:
           GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check the installable ZIP
-        run: python3 .github/scripts/validate-release.py "$GITHUB_REF_NAME" ".release/CleanBinds-${GITHUB_REF_NAME}-forever.zip"
+        run: python3 .github/scripts/validate-release.py "$RELEASE_TAG" ".release/CleanBinds-${RELEASE_TAG}-forever.zip"
 
       - name: Publish the verified package to Wago and GitHub
         uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
