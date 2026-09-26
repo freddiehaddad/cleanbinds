@@ -1,6 +1,13 @@
-<img align="right" src="https://raw.githubusercontent.com/freddiehaddad/cleanbinds/main/Media/Icon.png" alt="Clean Binds emblem" width="96" height="96">
-
-# Clean Binds
+<h1>
+  <img
+    src="https://github.com/freddiehaddad/cleanbinds/raw/main/Media/Icon.png"
+    alt="Clean Binds emblem"
+    width="48"
+    height="48"
+    align="absmiddle"
+  >
+  Clean Binds
+</h1>
 
 Custom action-bar keybinding labels for World of Warcraft: Forever beta.
 Replace long names such as **Mouse Wheel Down** with **MWD** without changing
