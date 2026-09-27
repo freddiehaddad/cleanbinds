@@ -9,122 +9,124 @@
   Clean Binds
 </h1>
 
-Custom action-bar keybinding labels for World of Warcraft: Forever beta.
-Replace long names such as **Mouse Wheel Down** with **MWD** without changing
-your keybindings.
+**Know your keybinds at a glance.**
+
+Long keybinding names can get cut off on your action bars, making binds like
+**Mouse Wheel Up** and **Mouse Wheel Down** hard to tell apart. Clean Binds lets
+you give each button a clear, short label such as **MWU** or **MWD** in **World
+of Warcraft: Forever**. Your keybindings stay exactly the same.
 
 [Download on Wago](https://addons.wago.io/addons/cleanbinds) |
 [GitHub releases](https://github.com/freddiehaddad/cleanbinds/releases)
 
 ## Features
 
-The native UI is available at **Options -> AddOns -> Clean Binds**, with pages
-for Action Bars 1-8, Pet Bar, and Stance Bar. It shows real bindings with editable
-label previews, keyboard navigation, reset confirmation, and combat read-only
-behavior.
-
-**Labels automatically follow WoW's account-wide or character-specific
-keybindings.** Edits update the preview and real action buttons. CleanBinds
-never changes your keybindings or selects a binding mode for you.
-
-## Saved settings
-
-CleanBinds follows **Character Specific Key Bindings** in WoW's Keybindings
-options. The current scope is shown at the top of each CleanBinds page.
-
-| WoW binding mode | CleanBinds labels and enable setting |
-| --- | --- |
-| Account-wide | Shared by characters using account-wide bindings. |
-| Character-specific | Independent settings for the current character. |
-
-The first time a character uses its own setup, it starts with native labels,
-not copies of the shared overrides. **Enable custom labels** initially matches
-the account setting, then remembers that character's choice independently.
-
-Switching modes recalls each setup's labels and enable state. For example, a
-button can have `MWD` in the shared setup and `Q` in a character's setup.
-Changes are saved automatically when you reload the UI or log out.
+- **Short labels you choose.** Customize each button individually, including
+  mouse buttons, the mouse wheel, and Shift, Ctrl, or Alt combinations.
+- **Labels for MMO mice.** Use names like `N1` or `N12` for side-button keybinds
+  on a Razer Naga or similar mouse, even when those buttons are mapped to
+  keyboard keys.
+- **Blizzard's familiar action bars.** Change the text without replacing your
+  bars or changing their fonts, colors, or layout.
+- **Built into Options.** Browse buttons by action bar and preview your labels
+  as you type.
+- **Shared or character-specific settings.** Labels automatically follow WoW's
+  keybinding setting, with no extra profile selector.
 
 ## Installation
 
-Download the release ZIP from Wago or GitHub Releases, then place its extracted
-**CleanBinds** folder at:
+On Wago, choose **Classic Forever** as the game version.
+
+For a manual install, download the release ZIP from Wago or GitHub Releases.
+Place the extracted **CleanBinds** folder in your WoW Forever AddOns folder.
+Within your World of Warcraft installation, the file layout should be:
 
 ```text
-C:\Program Files (x86)\World of Warcraft\_classic_beta_\Interface\AddOns\CleanBinds
+_classic_beta_\Interface\AddOns\CleanBinds\CleanBinds.toc
 ```
 
-`CleanBinds.toc` must be directly inside that folder.
 On GitHub, choose the **CleanBinds-VERSION-forever.zip** release asset, not the
-automatically generated source-code archive.
+source-code archive.
 
 Restart WoW and enable **Clean Binds** in the AddOns list.
 
-## Usage
+## Set up your labels
 
-1. Run `/cleanbinds`, or open **Esc -> Options -> AddOns -> Clean Binds**.
-2. Select the action bar containing the button you want to customize.
-3. Click its **Custom label** cell, type a label such as `MWD`, and press Enter.
+1. Type `/cleanbinds` in chat, or open **Esc -> Options -> AddOns -> Clean
+   Binds**.
+2. Choose an action bar.
+3. Click a button's **Custom label** field, enter a label such as `MWD`, and
+   press Enter. The label appears on the action button immediately.
 
-The action-button name and current binding are read-only. Hover the binding to
-see its full text and any additional assigned keys. Only the custom label changes.
+Your current keybindings are shown for reference; they cannot be changed here.
+Hover over a binding to see its full name and any additional keys assigned to
+that button.
 
-Tab/Shift-Tab accepts an edit and moves between label fields. Clicking elsewhere
-also accepts; Escape cancels the current edit. Clear a field to restore the
-native label. A preview shows the label at a shared magnification, preserving
-native button and font proportions. Labels that are too wide receive a warning
-but can still be saved.
+Press Tab or Shift+Tab to save and move between fields. Clicking elsewhere also
+saves; Escape cancels the current edit. The preview warns if a label is too
+wide, but you can still use it.
 
-Use **Reset This Bar** to clear one bar's overrides, or **Reset All Labels** on
-the parent page to clear every override **in the displayed scope**. Both require
-confirmation and leave the other setup untouched. An account-wide reset affects
-the shared labels, not independent character labels.
+Configure labels outside combat. Your existing labels keep working in combat.
+Changes are saved automatically when you reload the UI or log out.
 
-Turning off **Enable custom labels** restores native text without discarding
-labels in that setup. If the binding scope changes while you are editing or
-confirming a reset, the unfinished operation is canceled to protect both setups.
+## Account-wide and character-specific labels
 
-Use `/cleanbinds status` to see the client version, active scope, and available
-action bars.
+Clean Binds follows **Character Specific Key Bindings** in WoW's Keybindings
+options. The active setup is shown at the top of each Clean Binds page.
+
+| Character Specific Key Bindings | Labels and the enable setting |
+| --- | --- |
+| Unchecked | Shared with other characters using account-wide bindings. |
+| Checked | Saved separately for this character. |
+
+**This checkbox is set separately for each character.** Leave it unchecked on
+every character that should share your labels. Create a shared label once, and
+those characters use it too.
+
+A new character-specific setup starts with WoW's default labels, not copies of
+your shared labels. **Enable custom labels** initially matches the shared
+setting, then remembers that character's choice independently.
+
+Switching back to account-wide bindings restores your shared labels. It does not
+copy character-only labels into the shared setup. Each setup retains its labels
+for when you return to it, provided the keybindings still match.
+
+## Changing and resetting labels
+
+Clear a **Custom label** field to restore WoW's default text for that button.
+Use **Reset This Bar** or **Reset All Labels** to clear more labels at once.
+Both ask for confirmation and affect **only the setup shown on the page**. An
+account-wide reset leaves independent character labels untouched.
+
+Uncheck **Enable custom labels** to use WoW's default text without deleting your
+labels. Each setup remembers its own on/off setting.
+
+If you change the key shown on a button, Clean Binds clears that button's custom
+label in the affected setup so it does not show a misleading key. This also
+applies to key changes made while the addon was disabled. Changing only a
+secondary binding keeps the label if the displayed key stays the same.
+
+Labels belong to buttons, not to the spells or macros placed on them. You can
+also prepare a label for an unbound button; it appears when you assign a key.
 
 ## Supported bars
 
-CleanBinds supports Blizzard's **Action Bars 1-8**, **Pet Bar**, and **Stance Bar**
-(called **Special Action Buttons** in WoW's keybinding settings). Hidden or
-inactive bars remain configurable.
+Clean Binds supports Blizzard's **Action Bars 1-8**, **Pet Bar**, and **Stance
+Bar** (listed as **Special Action Buttons** in WoW's Keybindings options).
+Hidden or inactive bars can still be configured.
 
-There is no separate Possess page. Possession actions that reuse the main action
-buttons use their labels.
+Vehicle and other temporary action bars that reuse the main bar's bindings use
+its labels rather than having a separate setup. Vehicle support is experimental.
 
-Vehicle/override displays use the first six main action-bar bindings. They have
-no separate settings page and inherit those buttons' labels. Vehicle/override
-support is experimental.
-
-Third-party action bars, extra-action/totem/flyout buttons, appearance controls,
-manually managed profiles, and other WoW clients are not supported.
-
-## Label behavior
-
-Labels belong to individual buttons, not spells or globally renamed keys. Empty
-or whitespace-only labels restore the default. Long labels are allowed with a
-fit warning; text is preserved as UTF-8 and displayed literally.
-
-A saved change to a button's displayed binding clears its label **only in that
-binding setup**. A stale label is also removed when its key changed while the
-setup or addon was inactive. For example, `MWD` is cleared if its button is now
-bound to F.
-
-Secondary-only changes keep the label when the displayed key is unchanged.
-Simply switching scopes or characters does not erase labels for unchanged
-bindings. Canceled binding edits and input-device changes also preserve them.
-An override prepared for an unbound button becomes active on its first binding.
-
-Custom labels preserve the game's fonts, colors, positioning, and visibility.
-Clearing an override or disabling custom labels restores the latest native text.
-Settings are read-only during combat, but existing custom labels remain active.
+Action bars from other addons, extra-action buttons, totem bars, and flyout
+buttons are not supported. Clean Binds is for **World of Warcraft: Forever**,
+not other WoW versions.
 
 ## Support and license
 
-[Report an issue](https://github.com/freddiehaddad/cleanbinds/issues).
-CleanBinds is distributed under the
+[Report an issue](https://github.com/freddiehaddad/cleanbinds/issues). Include
+your WoW version and what happened; `/cleanbinds status` shows your version,
+active binding setup, and available action bars.
+
+Clean Binds is distributed under the
 [MIT License](https://github.com/freddiehaddad/cleanbinds/blob/main/LICENSE).
