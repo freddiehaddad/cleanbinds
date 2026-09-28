@@ -10,6 +10,14 @@ on:
         description: Existing annotated version tag to publish
         required: true
         type: string
+      destination:
+        description: Use curseforge only to recover a missing CurseForge upload
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - curseforge
 
 permissions:
   contents: read
@@ -26,6 +34,7 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_DESTINATION: ${{ inputs.destination || 'all' }}
     steps:
       - name: Check out the release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,14 +44,23 @@ jobs:
           persist-credentials: false
 
       - name: Check release tag and publishing configuration
+        timeout-minutes: 1
         env:
-          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          WAGO_API_TOKEN: ${{ env.RELEASE_DESTINATION == 'all' && secrets.WAGO_API_TOKEN || '' }}
         run: |
-          python3 .github/scripts/validate-release.py "$RELEASE_TAG"
-          if [[ -z "$WAGO_API_TOKEN" ]]; then
+          case "$RELEASE_DESTINATION" in
+            all|curseforge) ;;
+            *)
+              echo "::error::Unknown release destination: $RELEASE_DESTINATION"
+              exit 1
+              ;;
+          esac
+          if [[ "$RELEASE_DESTINATION" == "all" && -z "$WAGO_API_TOKEN" ]]; then
             echo "::error::WAGO_API_TOKEN must be configured before publishing."
             exit 1
           fi
+          python3 .github/scripts/validate-release.py "$RELEASE_TAG" --curseforge
 
       - name: Install Lua
         run: |
@@ -52,9 +70,12 @@ jobs:
           fi
 
       - name: Run addon checks
-        run: lua5.1 tests/run.lua
+        run: |
+          python3 -m unittest discover -s tests -p test_release.py
+          lua5.1 tests/run.lua
 
       - name: Build the release ZIP without uploading
+        if: env.RELEASE_DESTINATION == 'all'
         uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
         with:
           args: -d -p 0 -w 0
@@ -62,14 +83,73 @@ jobs:
         env:
           GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download the published ZIP for CurseForge recovery
+        if: env.RELEASE_DESTINATION == 'curseforge'
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "CleanBinds-${RELEASE_TAG}-forever.zip" --dir .release
+
       - name: Check the installable ZIP
         run: python3 .github/scripts/validate-release.py "$RELEASE_TAG" ".release/CleanBinds-${RELEASE_TAG}-forever.zip"
 
-      - name: Publish the verified package to Wago and GitHub
+      - name: Upload the verified package to CurseForge, Wago, and GitHub
+        if: env.RELEASE_DESTINATION == 'all'
         uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
         with:
-          args: -c -o -p 0 -w 0
+          args: -c -o -w 0
           pandoc: "false"
         env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
           GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Recover the CurseForge upload only
+        if: env.RELEASE_DESTINATION == 'curseforge'
+        timeout-minutes: 3
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          archive=".release/CleanBinds-${RELEASE_TAG}-forever.zip"
+          python3 .github/scripts/validate-release.py "$RELEASE_TAG" "$archive" \
+            --curseforge-metadata .release/curseforge-metadata.json
+          if ! curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 120 \
+            --header "X-Api-Token: $CF_API_TOKEN" \
+            --form "metadata=<.release/curseforge-metadata.json" \
+            --form "file=@$archive" \
+            --output .release/curseforge-result.json \
+            "https://wow.curseforge.com/api/projects/1715823/upload-file"; then
+            echo "::error::CurseForge upload failed. Check existing files before retrying."
+            if [[ -s .release/curseforge-result.json ]]; then
+              cat .release/curseforge-result.json
+            fi
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          try:
+              result = json.loads(Path(".release/curseforge-result.json").read_text(encoding="utf-8"))
+          except (ValueError, OSError):
+              raise SystemExit("Invalid CurseForge upload response. Check existing files before retrying.")
+          if not isinstance(result, dict) or type(result.get("id")) is not int or result["id"] <= 0:
+              raise SystemExit("Missing CurseForge file ID. Check existing files before retrying.")
+          message = f"CurseForge file {result['id']} submitted; moderation approval is separate."
+          print(message)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(message + "\n")
+          PY
+
+      - name: Report publishing status
+        if: always()
+        run: |
+          {
+            echo "Check each destination's upload result before retrying a failed run."
+            echo "CurseForge upload success means submitted, not approved or publicly available."
+            echo "Check [CurseForge files](https://www.curseforge.com/wow/addons/cleanbinds/files/all) before using CurseForge-only recovery."
+          } >> "$GITHUB_STEP_SUMMARY"

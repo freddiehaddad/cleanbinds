@@ -16,7 +16,8 @@ Long keybinding names can get cut off on your action bars, making binds like
 you give each button a clear, short label such as **MWU** or **MWD** in **World
 of Warcraft: Forever**. Your keybindings stay exactly the same.
 
-[Download on Wago](https://addons.wago.io/addons/cleanbinds) |
+Download on [CurseForge](https://www.curseforge.com/wow/addons/cleanbinds) |
+[Wago](https://addons.wago.io/addons/cleanbinds) |
 [GitHub releases](https://github.com/freddiehaddad/cleanbinds/releases)
 
 ## Features
@@ -35,11 +36,12 @@ of Warcraft: Forever**. Your keybindings stay exactly the same.
 
 ## Installation
 
-On Wago, choose **Classic Forever** as the game version.
+On CurseForge, choose **Forever**. On Wago, choose **Classic Forever** as the
+game version.
 
-For a manual install, download the release ZIP from Wago or GitHub Releases.
-Place the extracted **CleanBinds** folder in your WoW Forever AddOns folder.
-Within your World of Warcraft installation, the file layout should be:
+For a manual install, download the release ZIP from CurseForge, Wago, or GitHub
+Releases. Place the extracted **CleanBinds** folder in your WoW Forever AddOns
+folder. Within your World of Warcraft installation, the file layout should be:
 
 ```text
 _classic_beta_\Interface\AddOns\CleanBinds\CleanBinds.toc

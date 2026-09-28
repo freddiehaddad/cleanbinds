@@ -3,6 +3,7 @@
 ## Notes: Customize keybinding labels on Blizzard action bars.
 ## IconTexture: Interface\AddOns\CleanBinds\Media\Icon.tga
 ## Version: @project-version@
+## X-Curse-Project-ID: 1715823
 ## X-Wago-ID: vNAWeoKo
 ## SavedVariables: CleanBindsDB
 ## SavedVariablesPerCharacter: CleanBindsCharacterDB
