@@ -281,6 +281,152 @@ test("supports loading after login", function()
     equal(addon.state, "ready")
 end)
 
+test("waits for an initial binding scope without creating or editing saved data", function()
+    local env, addon, fire, messages, game = loadAddon({ bindingSet = 0 })
+    fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.state, "loading")
+    fire("PLAYER_LOGIN")
+    equal(addon.state, "waiting_bindings")
+    equal(addon.db, nil)
+    equal(addon.category, nil)
+    equal(env.CleanBindsDB, nil)
+    equal(env.CleanBindsCharacterDB, nil)
+    equal(addon.IsEnabled(), false)
+    equal(addon.SetLabel(addon.Bars[1], 1, "Wrong"), false)
+    equal(addon.SetEnabled(false), false)
+    equal(addon.ResetLabels(), false)
+    equal(#messages, 1)
+    equal(messages[1], addon.L.ADDON_NAME .. ": " .. addon.L.BINDINGS_LOADING)
+
+    game.Flush()
+    game.Flush()
+    equal(addon.state, "waiting_bindings")
+    equal(env.CleanBindsDB, nil)
+    equal(env.CleanBindsCharacterDB, nil)
+    equal(#messages, 1)
+    env.SlashCmdList.CLEANBINDS("")
+    env.SlashCmdList.CLEANBINDS("status")
+    equal(messages[2], messages[1])
+    equal(messages[3], messages[1])
+end)
+
+test("a deferred startup selects only the resolved account or character profile", function()
+    for _, scope in ipairs({ 1, 2 }) do
+        local account = {
+            schemaVersion = 1, enabled = false,
+            overrides = { ["actionbar1:1"] = "Account" },
+            bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "F") },
+        }
+        local character = {
+            schemaVersion = 1, enabled = true,
+            overrides = { ["actionbar1:1"] = "Character" },
+            bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "G") },
+        }
+        local env, addon, fire, messages, game = loadAddon({
+            loggedIn = true, bindingSet = 0, database = account, characterDatabase = character,
+        })
+        fire("ADDON_LOADED", "CleanBinds")
+        equal(addon.state, "waiting_bindings")
+        equal(addon.db, nil)
+        equal(account.overrides["actionbar1:1"], "Account")
+        equal(character.overrides["actionbar1:1"], "Character")
+        equal(account.bindingSnapshots["actionbar1:1"].keyboard, "F")
+        equal(character.bindingSnapshots["actionbar1:1"].keyboard, "G")
+
+        game.bindingSet = scope
+        game.bindings = { ACTIONBUTTON1 = { scope == 1 and "F" or "G" } }
+        game.Flush()
+        equal(addon.state, "ready")
+        equal(addon.db, scope == 1 and account or character)
+        equal(addon.GetLabel(addon.Bars[1], 1), scope == 1 and "Account" or "Character")
+        equal(addon.IsEnabled(), scope == 2)
+        equal(env.CleanBindsDB, account)
+        equal(env.CleanBindsCharacterDB, character)
+        equal(account.overrides["actionbar1:1"], "Account")
+        equal(character.overrides["actionbar1:1"], "Character")
+        equal(account.bindingSnapshots["actionbar1:1"].keyboard, "F")
+        equal(character.bindingSnapshots["actionbar1:1"].keyboard, "G")
+        equal(#messages, 1)
+    end
+end)
+
+test("binding lifecycle events recover startup without polling or duplicate initialization", function()
+    for _, event in ipairs({ "BINDINGS_LOADED", "UPDATE_BINDINGS", "PLAYER_ENTERING_WORLD" }) do
+        local env, addon, fire, messages, game = loadAddon({ bindingSet = 0 })
+        local initializeLabels = addon.InitializeLabels
+        local initializations = 0
+        addon.InitializeLabels = function()
+            initializations = initializations + 1
+            return initializeLabels()
+        end
+        local scopeReads = 0
+        env.GetCurrentBindingSet = function()
+            scopeReads = scopeReads + 1
+            return game.bindingSet
+        end
+        fire(event)
+        equal(initializations, 0)
+        fire("ADDON_LOADED", "CleanBinds")
+        fire("PLAYER_LOGIN")
+        game.Flush()
+        equal(addon.state, "waiting_bindings")
+        local reads = scopeReads
+        game.Flush()
+        equal(scopeReads, reads)
+        fire(event)
+        fire(event)
+        game.Flush()
+        equal(scopeReads, reads + 1)
+        equal(initializations, 0)
+        equal(#messages, 1)
+
+        fire(event)
+        fire(event)
+        equal(addon.state, "waiting_bindings")
+        game.bindingSet = 1
+        game.Flush()
+        equal(addon.state, "ready")
+        equal(initializations, 1)
+        equal(addon.db, env.CleanBindsDB)
+        local category = addon.category
+        fire("PLAYER_LOGIN")
+        fire("ADDON_LOADED", "CleanBinds")
+        fire(event)
+        fire(event)
+        game.Flush()
+        equal(initializations, 1)
+        equal(addon.category, category)
+        equal(#messages, 1)
+    end
+end)
+
+test("deferred startup still rejects invalid profiles and truly unknown scopes", function()
+    for _, scope in ipairs({ 1, 2, 99 }) do
+        local account = { schemaVersion = 99 }
+        local character = { schemaVersion = 99 }
+        local env, addon, fire, messages, game = loadAddon({
+            loggedIn = true, bindingSet = 0, database = account, characterDatabase = character,
+        })
+        fire("ADDON_LOADED", "CleanBinds")
+        equal(addon.state, "waiting_bindings")
+        game.bindingSet = scope
+        game.Flush()
+        equal(addon.state, "failed")
+        equal(addon.db, nil)
+        equal(addon.category, nil)
+        equal(env.CleanBindsDB, account)
+        equal(env.CleanBindsCharacterDB, character)
+        equal(#messages, 2)
+        assert(messages[2]:find(scope == 99 and "scope 99" or "unsupported schema", 1, true))
+        game.bindingSet = 1
+        fire("UPDATE_BINDINGS")
+        fire("PLAYER_ENTERING_WORLD")
+        game.Flush()
+        equal(addon.state, "failed")
+        equal(#messages, 2)
+    end
+end)
+
 test("preserves existing account data", function()
     local existing = {
         schemaVersion = 1,
@@ -1684,6 +1830,80 @@ test("leaving either character setup restores native text when account labels ar
         game.Switch(2)
         equal(button.HotKey:GetText(), customLabel)
     end
+end)
+
+test("deferred startup restores action labels and installs scope hooks only once", function()
+    local button = mockButton("ActionButton1", "F")
+    local account = {
+        schemaVersion = 1, enabled = true,
+        overrides = { ["actionbar1:1"] = "Shared" },
+        bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "F") },
+    }
+    local env, addon, fire, _, game = loadAddon({
+        loggedIn = true, bindingSet = 0, database = account,
+        setup = function(environment)
+            environment.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    fire("ADDON_LOADED", "CleanBinds")
+    game.Flush()
+    equal(addon.state, "waiting_bindings")
+    equal(button.HotKey:GetText(), "F")
+    equal(button.HotKey.writes, 0)
+    equal(button.scripts.OnShow, nil)
+    equal(account.overrides["actionbar1:1"], "Shared")
+
+    fire("BINDINGS_LOADED")
+    fire("UPDATE_BINDINGS")
+    fire("PLAYER_ENTERING_WORLD")
+    game.bindingSet = 1
+    game.bindings = { ACTIONBUTTON1 = { "F" } }
+    game.Flush()
+    equal(addon.state, "ready")
+    equal(button.HotKey:GetText(), "Shared")
+    equal(#button.scripts.OnShow, 1)
+
+    game.Switch(2)
+    equal(button.HotKey:GetText(), "F")
+    assert(addon.SetLabel(addon.Bars[1], 1, "Local"))
+    equal(button.HotKey:GetText(), "Local")
+    game.Switch(1)
+    game.Flush()
+    equal(button.HotKey:GetText(), "Shared")
+    equal(env.CleanBindsCharacterDB.overrides["actionbar1:1"], "Local")
+    equal(#button.scripts.OnShow, 1)
+end)
+
+test("deferred startup reconciles changed bindings only after the scope is known", function()
+    local account = {
+        schemaVersion = 1, enabled = true,
+        overrides = { ["actionbar1:1"] = "Old" },
+        bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "F") },
+    }
+    local character = {
+        schemaVersion = 1, enabled = true,
+        overrides = { ["actionbar1:1"] = "Local" },
+        bindingSnapshots = { ["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "G") },
+    }
+    local _, addon, fire, messages, game = loadAddon({
+        loggedIn = true, bindingSet = 0, database = account, characterDatabase = character,
+    })
+    fire("ADDON_LOADED", "CleanBinds")
+    game.Flush()
+    equal(account.overrides["actionbar1:1"], "Old")
+    equal(account.bindingSnapshots["actionbar1:1"].keyboard, "F")
+
+    game.bindingSet = 1
+    game.bindings = { ACTIONBUTTON1 = { "H" } }
+    fire("UPDATE_BINDINGS")
+    game.Flush()
+    equal(addon.state, "ready")
+    equal(account.overrides["actionbar1:1"], nil)
+    equal(account.bindingSnapshots["actionbar1:1"], nil)
+    equal(character.overrides["actionbar1:1"], "Local")
+    equal(character.bindingSnapshots["actionbar1:1"].keyboard, "G")
+    equal(#messages, 2)
+    assert(messages[2]:find("displayed binding changed", 1, true))
 end)
 
 print(("%d tests passed"):format(passed))

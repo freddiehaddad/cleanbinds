@@ -7,6 +7,7 @@ addon.L = {
     PET_BAR = "Pet Bar",
     STANCE_BAR = "Stance Bar",
     LOADING = "Waiting for the game to finish loading.",
+    BINDINGS_LOADING = "Waiting for WoW to finish loading keybindings. Saved settings are unchanged.",
     READY = "Loaded (WoW %s, build %s, Interface %d).",
     ACCOUNT_SCOPE = "Account-wide bindings",
     CHARACTER_SCOPE = "This character's bindings",

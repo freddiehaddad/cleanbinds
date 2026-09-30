@@ -109,10 +109,13 @@ local function Fail(message)
     addon.Print(L.STARTUP_FAILED:format(message))
 end
 
-local function Initialize()
-    local capabilityError = CheckCapabilities()
-    if capabilityError then
-        Fail(capabilityError)
+local events = CreateFrame("Frame")
+local bindingStartupEvents = { "BINDINGS_LOADED", "UPDATE_BINDINGS", "PLAYER_ENTERING_WORLD" }
+local initializationQueued = false
+
+local function InitializeBindings()
+    if GetCurrentBindingSet() == Enum.BindingSet.Default then
+        addon.state = "waiting_bindings"
         return
     end
 
@@ -127,9 +130,49 @@ local function Initialize()
     addon.state = "ready"
 end
 
+local function QueueInitialization()
+    if initializationQueued then
+        return
+    end
+    initializationQueued = true
+    -- Binding events can fire before the client updates the selected scope.
+    C_Timer.After(0, function()
+        initializationQueued = false
+        if addon.state ~= "waiting_bindings" then
+            return
+        end
+        InitializeBindings()
+        if addon.state ~= "waiting_bindings" then
+            for _, event in ipairs(bindingStartupEvents) do
+                events:UnregisterEvent(event)
+            end
+        end
+    end)
+end
+
+local function Initialize()
+    local capabilityError = CheckCapabilities()
+    if capabilityError then
+        Fail(capabilityError)
+        return
+    end
+
+    InitializeBindings()
+    if addon.state == "waiting_bindings" then
+        for _, event in ipairs(bindingStartupEvents) do
+            events:RegisterEvent(event)
+        end
+        addon.Print(L.BINDINGS_LOADING)
+        QueueInitialization()
+    end
+end
+
 function addon.PrintStatus()
     if addon.state == "failed" then
         addon.Print(L.STARTUP_FAILED:format(addon.failure))
+        return
+    elseif addon.state == "waiting_bindings" then
+        addon.Print(L.BINDINGS_LOADING)
         return
     end
     if addon.state ~= "ready" then
@@ -162,7 +205,6 @@ SlashCmdList.CLEANBINDS = function(message)
     end
 end
 
-local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" then
@@ -178,5 +220,7 @@ events:SetScript("OnEvent", function(self, event, name)
     elseif event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         Initialize()
+    elseif addon.state == "waiting_bindings" then
+        QueueInitialization()
     end
 end)
