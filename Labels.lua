@@ -127,6 +127,10 @@ function addon.IsEnabled()
     return IsScopeReady() and addon.db ~= nil and addon.db.enabled
 end
 
+function addon.ShouldHideMacroNames()
+    return IsScopeReady() and addon.db ~= nil and addon.db.hideMacroNames == true
+end
+
 local function InvalidateInteractions()
     scopeToken = scopeToken + 1
     if addon.CancelScopeInteractions then
@@ -309,6 +313,19 @@ function addon.SetEnabled(enabled, expectedToken)
         return false, L.INVALID_DATABASE:format("enabled must be a boolean")
     end
     addon.db.enabled = enabled
+    Notify()
+    return true
+end
+
+function addon.SetHideMacroNames(hidden, expectedToken)
+    local allowed, reason = addon.CanEdit(expectedToken)
+    if not allowed then
+        return false, reason
+    end
+    if type(hidden) ~= "boolean" then
+        return false, L.INVALID_DATABASE:format("hideMacroNames must be a boolean")
+    end
+    addon.db.hideMacroNames = hidden
     Notify()
     return true
 end

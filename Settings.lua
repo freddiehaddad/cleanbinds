@@ -3,6 +3,7 @@ local L = addon.L
 local pages = {}
 local descriptions = {}
 local enabledSetting
+local hideMacroNamesSetting
 local pendingReset
 local rowHeight = 25
 local previewSize = 56
@@ -283,6 +284,9 @@ local function RefreshPages()
     if enabledSetting then
         enabledSetting:NotifyUpdate()
     end
+    if hideMacroNamesSetting then
+        hideMacroNamesSetting:NotifyUpdate()
+    end
     for frame in pairs(descriptions) do
         frame.Text:SetText(frame.initializer.data.text())
     end
@@ -499,6 +503,15 @@ function addon.InitializeSettings()
             end
         end)
     LockWhenUnavailable(Settings.CreateCheckbox(category, enabledSetting, L.ENABLE_TOOLTIP))
+
+    hideMacroNamesSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_HIDE_MACRO_NAMES",
+        Settings.VarType.Boolean, L.HIDE_MACRO_NAMES, false, addon.ShouldHideMacroNames, function(value)
+            local success, reason = addon.SetHideMacroNames(value)
+            if not success then
+                addon.Print(reason)
+            end
+        end)
+    LockWhenUnavailable(Settings.CreateCheckbox(category, hideMacroNamesSetting, L.HIDE_MACRO_NAMES_TOOLTIP))
 
     local reset = CreateSettingsButtonInitializer("", L.RESET_ALL, function()
         ConfirmReset()

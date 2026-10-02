@@ -29,6 +29,8 @@ Download on [CurseForge](https://www.curseforge.com/wow/addons/cleanbinds) |
   keyboard keys.
 - **Blizzard's familiar action bars.** Change the text without replacing your
   bars or changing their fonts, colors, or layout.
+- **Optional macro-name hiding.** Keep macro names off your action buttons
+  without renaming your macros.
 - **Built into Options.** Browse buttons by action bar and preview your labels
   as you type.
 - **Shared or character-specific settings.** Labels automatically follow WoW's
@@ -68,15 +70,22 @@ Press Tab or Shift+Tab to save and move between fields. Clicking elsewhere also
 saves; Escape cancels the current edit. The preview warns if a label is too
 wide, but you can still use it.
 
-Configure labels outside combat. Your existing labels keep working in combat.
+Change settings outside combat. Labels and macro-name visibility stay active in combat.
 Changes are saved automatically when you reload the UI or log out.
+
+## Hide macro names
+
+Enable **Hide macro names** on the main Clean Binds settings page to hide them
+on all supported action bars. Names in the macro window and tooltips are
+unchanged. This works independently of **Enable custom labels**; uncheck it
+to show names again. Resetting labels does not change this preference.
 
 ## Account-wide and character-specific labels
 
 Clean Binds follows **Character Specific Key Bindings** in WoW's Keybindings
 options. The active setup is shown at the top of each Clean Binds page.
 
-| Character Specific Key Bindings | Labels and the enable setting |
+| Character Specific Key Bindings | Labels and settings |
 | --- | --- |
 | Unchecked | Shared with other characters using account-wide bindings. |
 | Checked | Saved separately for this character. |
@@ -86,8 +95,8 @@ every character that should share your labels. Create a shared label once, and
 those characters use it too.
 
 A new character-specific setup starts with WoW's default labels, not copies of
-your shared labels. **Enable custom labels** initially matches the shared
-setting, then remembers that character's choice independently.
+your shared labels. **Enable custom labels** and **Hide macro names** initially
+match the shared settings, then remember that character's choices independently.
 
 Switching back to account-wide bindings restores your shared labels. It does not
 copy character-only labels into the shared setup. Each setup retains its labels
