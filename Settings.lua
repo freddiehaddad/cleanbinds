@@ -2,8 +2,10 @@ local _, addon = ...
 local L = addon.L
 local pages = {}
 local descriptions = {}
+local fontPreviews = {}
 local enabledSetting
 local hideMacroNamesSetting
+local fontSizeSetting
 local pendingReset
 local rowHeight = 25
 local previewSize = 56
@@ -22,6 +24,59 @@ end
 function CleanBindsDescriptionMixin:Release()
     descriptions[self] = nil
     self.initializer = nil
+end
+
+local function NormalizeFontSliderSize(size)
+    local rounded = math.floor(size + 0.5)
+    return ApproximatelyEqual(size, rounded) and rounded or size
+end
+
+CleanBindsFontSizeSliderMixin = {}
+
+function CleanBindsFontSizeSliderMixin:Init(initializer)
+    self.fontUnavailable = false
+    self.synchronizing = true
+    SettingsSliderControlMixin.Init(self, initializer)
+    self.synchronizing = false
+    self:SetValue()
+end
+
+function CleanBindsFontSizeSliderMixin:SetValue()
+    -- Native sizing is a setting mode, not a numeric slider position.
+    local size = self:GetSetting():GetValue()
+    if size == 0 then
+        local font, nativeSize = addon.GetPreviewKeybindFont(addon.GetBarButton(addon.Bars[1], 1), true)
+        size = font and nativeSize or nil
+    end
+    self.fontUnavailable = size == nil
+    local previous = self.synchronizing
+    self.synchronizing = true
+    if size then
+        size = NormalizeFontSliderSize(size)
+        SettingsSliderControlMixin.SetValue(self, size)
+    end
+    self.synchronizing = previous
+    self.SliderWithSteppers:FormatValue(size)
+    self:EvaluateState()
+end
+
+function CleanBindsFontSizeSliderMixin:OnSliderValueChanged(value)
+    if not self.synchronizing then
+        value = NormalizeFontSliderSize(value)
+        local font, nativeSize = addon.GetPreviewKeybindFont(addon.GetBarButton(addon.Bars[1], 1), true)
+        if font and ApproximatelyEqual(value, nativeSize) then
+            value = 0
+        end
+        SettingsSliderControlMixin.OnSliderValueChanged(self, value)
+    end
+end
+
+function CleanBindsFontSizeSliderMixin:EvaluateState()
+    SettingsSliderControlMixin.EvaluateState(self)
+    if self.fontUnavailable then
+        self.SliderWithSteppers:SetEnabled(false)
+        self:DisplayEnabled(false)
+    end
 end
 
 local function SetNotice(page, text)
@@ -53,10 +108,30 @@ local function RefreshCell(row)
     row.Override:SetEnabled(addon.CanEdit() and not row.unavailableReason)
 end
 
+local function CreatePreview(parent)
+    local preview = CreateFrame("Frame", nil, parent)
+    preview:SetSize(previewSize, previewSize)
+    preview.Button = CreateFrame("Frame", nil, preview)
+    preview.Button:SetPoint("CENTER")
+    local background = preview.Button:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetAtlas("UI-HUD-ActionBar-IconFrame-Background")
+    preview.Border = preview.Button:CreateTexture(nil, "BORDER")
+    preview.Border:SetPoint("TOPLEFT")
+    preview.HotKey = preview.Button:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmallGray")
+    preview.HotKey:SetWordWrap(false)
+    preview.HotKey:SetMaxLines(1)
+    return preview
+end
+
 local function UpdatePreviewGeometry(preview, button)
     local hotkey = button and button.HotKey
     local sample = preview.Button
     local label = preview.HotKey
+    local font, size, flags = addon.GetPreviewKeybindFont(button)
+    if not font then
+        return false, size
+    end
     local width, height = 45, 45
     local labelWidth, labelHeight = 37, 10
     local accurate = hotkey ~= nil
@@ -65,7 +140,6 @@ local function UpdatePreviewGeometry(preview, button)
     if hotkey then
         width, height = button:GetSize()
         labelWidth, labelHeight = hotkey:GetSize()
-        label:SetFont(hotkey:GetFont())
         label:SetJustifyH(hotkey:GetJustifyH())
         label:SetJustifyV(hotkey:GetJustifyV())
         label:SetShadowColor(hotkey:GetShadowColor())
@@ -93,6 +167,7 @@ local function UpdatePreviewGeometry(preview, button)
 
     sample:SetSize(width, height)
     sample:SetScale(previewScale)
+    label:SetFont(font, size, flags)
     label:SetSize(labelWidth, labelHeight)
 
     local border = button and button:GetNormalTexture()
@@ -105,6 +180,48 @@ local function UpdatePreviewGeometry(preview, button)
     end
 
     return accurate and labelWidth > 0 and labelHeight > 0
+end
+
+CleanBindsFontPreviewMixin = {}
+
+function CleanBindsFontPreviewMixin:OnLoad()
+    self.Preview = CreatePreview(self)
+    self.Preview:SetPoint("TOPLEFT", 8, -8)
+    self.Title = AddText(self, "GameFontNormal", L.PREVIEW)
+    self.Title:SetPoint("TOPLEFT", self.Preview, "TOPRIGHT", 14, -3)
+    self.Status = AddText(self, "GameFontHighlightSmall", "")
+    self.Status:SetPoint("TOPLEFT", self.Title, "BOTTOMLEFT", 0, -8)
+    self.Status:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -130, 8)
+    self.Status:SetJustifyV("TOP")
+    self.Reset = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")
+    self.Reset:SetSize(110, 22)
+    self.Reset:SetPoint("TOPRIGHT", -16, -8)
+    self.Reset:SetText(L.DEFAULT_LABEL)
+    self.Reset:SetScript("OnClick", function()
+        local success, reason = addon.SetKeybindFontSize(nil, self.scopeToken)
+        if not success then
+            addon.Print(reason)
+        end
+    end)
+end
+
+function CleanBindsFontPreviewMixin:Init()
+    fontPreviews[self] = true
+    self:Refresh()
+end
+
+function CleanBindsFontPreviewMixin:Release()
+    fontPreviews[self] = nil
+end
+
+function CleanBindsFontPreviewMixin:Refresh()
+    self.scopeToken = addon.GetScopeToken()
+    local accurate, reason = UpdatePreviewGeometry(self.Preview, addon.GetBarButton(addon.Bars[1], 1))
+    self.Preview:SetShown(reason == nil)
+    self.Preview.HotKey:SetText(L.FONT_SIZE_SAMPLE)
+    self.Status:SetText(reason or (self.Preview.HotKey:IsTruncated() and L.LABEL_TOO_WIDE
+        or (not accurate and L.PREVIEW_APPROXIMATE or "")))
+    self.Reset:SetEnabled(addon.CanEdit() and addon.GetKeybindFontSize() ~= nil)
 end
 
 local function UpdatePreview(page)
@@ -123,7 +240,12 @@ local function UpdatePreview(page)
     end
 
     local button = addon.GetBarButton(page.bar, row.index)
-    local accurate = UpdatePreviewGeometry(page.Preview, button)
+    local accurate, previewError = UpdatePreviewGeometry(page.Preview, button)
+    if previewError then
+        page.Preview:Hide()
+        page.Status:SetText(previewError)
+        return
+    end
     local label = row.editing and row.Editor:GetText() or addon.GetLabel(page.bar, row.index)
     local customLabel, validationError = addon.NormalizeLabel(label or "")
     page.Preview.HotKey:SetText(customLabel and customLabel ~= "" and addon.LiteralLabel(customLabel) or row.defaultLabel)
@@ -287,6 +409,12 @@ local function RefreshPages()
     if hideMacroNamesSetting then
         hideMacroNamesSetting:NotifyUpdate()
     end
+    if fontSizeSetting then
+        fontSizeSetting:NotifyUpdate()
+    end
+    for preview in pairs(fontPreviews) do
+        preview:Refresh()
+    end
     for frame in pairs(descriptions) do
         frame.Text:SetText(frame.initializer.data.text())
     end
@@ -431,19 +559,8 @@ local function CreatePage(bar)
         page.Content:SetWidth(math.max(1, width))
     end)
 
-    page.Preview = CreateFrame("Frame", nil, page)
-    page.Preview:SetSize(previewSize, previewSize)
+    page.Preview = CreatePreview(page)
     page.Preview:SetPoint("BOTTOMLEFT", 16, 60)
-    page.Preview.Button = CreateFrame("Frame", nil, page.Preview)
-    page.Preview.Button:SetPoint("CENTER")
-    local background = page.Preview.Button:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints()
-    background:SetAtlas("UI-HUD-ActionBar-IconFrame-Background")
-    page.Preview.Border = page.Preview.Button:CreateTexture(nil, "BORDER")
-    page.Preview.Border:SetPoint("TOPLEFT")
-    page.Preview.HotKey = page.Preview.Button:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmallGray")
-    page.Preview.HotKey:SetWordWrap(false)
-    page.Preview.HotKey:SetMaxLines(1)
     page.PreviewTitle = AddText(page, "GameFontNormal", L.PREVIEW)
     page.PreviewTitle:SetPoint("BOTTOMLEFT", page.Preview, "RIGHT", 14, 3)
     page.PreviewDefault = AddText(page, "GameFontHighlightSmall", "")
@@ -512,6 +629,33 @@ function addon.InitializeSettings()
             end
         end)
     LockWhenUnavailable(Settings.CreateCheckbox(category, hideMacroNamesSetting, L.HIDE_MACRO_NAMES_TOOLTIP))
+
+    local function GetFontSize()
+        return addon.GetKeybindFontSize() or 0
+    end
+    fontSizeSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_KEYBIND_FONT_SIZE",
+        Settings.VarType.Number, L.KEYBIND_FONT_SIZE, 0, GetFontSize, function(value)
+            local size = value
+            if value == 0 then
+                size = nil
+            end
+            local success, reason = addon.SetKeybindFontSize(size)
+            if not success then
+                addon.Print(reason)
+            end
+        end)
+    local fontOptions = Settings.CreateSliderOptions(addon.MIN_KEYBIND_FONT_SIZE, addon.MAX_KEYBIND_FONT_SIZE, 1)
+    fontOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
+        if not value then
+            return L.UNAVAILABLE
+        end
+        return addon.GetKeybindFontSize() and tostring(value) or L.DEFAULT_FONT_SIZE:format(value)
+    end)
+    local fontSlider = Settings.CreateControlInitializer("CleanBindsFontSizeSliderTemplate",
+        fontSizeSetting, fontOptions, L.KEYBIND_FONT_SIZE_TOOLTIP)
+    LockWhenUnavailable(fontSlider)
+    layout:AddInitializer(fontSlider)
+    layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsFontPreviewTemplate", {}))
 
     local reset = CreateSettingsButtonInitializer("", L.RESET_ALL, function()
         ConfirmReset()

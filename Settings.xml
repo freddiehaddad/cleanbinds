@@ -13,6 +13,16 @@
         </Layers>
     </Frame>
 
+    <Frame name="CleanBindsFontSizeSliderTemplate" inherits="SettingsSliderControlTemplate"
+        mixin="CleanBindsFontSizeSliderMixin" virtual="true"/>
+
+    <Frame name="CleanBindsFontPreviewTemplate" mixin="CleanBindsFontPreviewMixin" virtual="true">
+        <Size y="80"/>
+        <Scripts>
+            <OnLoad method="OnLoad"/>
+        </Scripts>
+    </Frame>
+
     <Button name="CleanBindsBindingCellTemplate" inherits="UIMenuButtonStretchTemplate" virtual="true">
         <Size x="160" y="22"/>
         <ButtonText parentKey="Text" maxLines="1">

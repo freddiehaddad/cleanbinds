@@ -28,7 +28,9 @@ Download on [CurseForge](https://www.curseforge.com/wow/addons/cleanbinds) |
   on a Razer Naga or similar mouse, even when those buttons are mapped to
   keyboard keys.
 - **Blizzard's familiar action bars.** Change the text without replacing your
-  bars or changing their fonts, colors, or layout.
+  bars or changing their layout.
+- **Adjustable keybind font size.** Make labels easier to read without
+  enlarging your action buttons. Keep Blizzard's font style and colors.
 - **Optional macro-name hiding.** Keep macro names off your action buttons
   without renaming your macros.
 - **Built into Options.** Browse buttons by action bar and preview your labels
@@ -80,6 +82,17 @@ on all supported action bars. Names in the macro window and tooltips are
 unchanged. This works independently of **Enable custom labels**; uncheck it
 to show names again. Resetting labels does not change this preference.
 
+## Keybinding font size
+
+Use the **Keybinding font size** slider on the main Clean Binds page to choose
+a size from **10 to 14**. The preview updates as you adjust it; the step buttons
+allow precise changes. Returning to the default size or pressing **Default**
+restores each button's native font size.
+
+This applies to both native and custom keybind labels, even with **Enable custom
+labels** unchecked. Macro names, cooldown text, and button sizes are unchanged.
+**Reset This Bar** and **Reset All Labels** leave the font-size setting alone.
+
 ## Account-wide and character-specific labels
 
 Clean Binds follows **Character Specific Key Bindings** in WoW's Keybindings
@@ -95,8 +108,9 @@ every character that should share your labels. Create a shared label once, and
 those characters use it too.
 
 A new character-specific setup starts with WoW's default labels, not copies of
-your shared labels. **Enable custom labels** and **Hide macro names** initially
-match the shared settings, then remember that character's choices independently.
+your shared labels. **Enable custom labels**, **Hide macro names**, and
+**Keybinding font size** initially match the shared settings, then remember
+that character's choices independently.
 
 Switching back to account-wide bindings restores your shared labels. It does not
 copy character-only labels into the shared setup. Each setup retains its labels
