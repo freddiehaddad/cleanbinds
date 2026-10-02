@@ -290,6 +290,17 @@ local function SelectRow(row)
     UpdatePreview(page)
 end
 
+local function ScrollToRow(row)
+    local scroll = row.page.Scroll
+    local top = (row.index - 1) * rowHeight
+    local offset = scroll:GetVerticalScroll()
+    if top < offset then
+        scroll:SetVerticalScroll(top)
+    elseif top + rowHeight > offset + scroll:GetHeight() then
+        scroll:SetVerticalScroll(top + rowHeight - scroll:GetHeight())
+    end
+end
+
 local function CloseEditor(row)
     row.editing = false
     row.scopeToken = nil
@@ -362,14 +373,7 @@ local function BeginEdit(row)
     row.Editor:SetFocus()
     row.Editor:HighlightText()
 
-    local scroll = row.page.Scroll
-    local top = (row.index - 1) * rowHeight
-    local offset = scroll:GetVerticalScroll()
-    if top < offset then
-        scroll:SetVerticalScroll(top)
-    elseif top + rowHeight > offset + scroll:GetHeight() then
-        scroll:SetVerticalScroll(top + rowHeight - scroll:GetHeight())
-    end
+    ScrollToRow(row)
     UpdatePreview(row.page)
 end
 
@@ -613,6 +617,34 @@ local function CreatePage(bar)
     return page
 end
 
+local function RegisterBarSearch(page)
+    local barName = addon.GetBarName(page.bar)
+    local searchBarName = page.bar.id == "actionbar1" and L.ACTION_BAR:format(1) or barName
+    local category, layout = Settings.RegisterVerticalLayoutCategory(barName)
+    -- Redirects expose search entries without adding another sidebar category.
+    category.redirectCategory = page.category
+
+    local function AddEntry(row)
+        local name = row and row.name or barName
+        local initializer = CreateSettingsButtonInitializer(name, L.OPEN, function()
+            -- Force navigation out of search even when this bar is already selected.
+            SettingsPanel:SelectCategory(page.category, true)
+            if row then
+                SelectRow(row)
+                ScrollToRow(row)
+            end
+        end, L.OPEN_SETTINGS_TOOLTIP, false)
+        initializer:AddSearchTags(name, row and L.BUTTON_NAME:format(searchBarName, row.index) or searchBarName)
+        layout:AddInitializer(initializer)
+    end
+
+    AddEntry()
+    for _, row in ipairs(page.rows) do
+        AddEntry(row)
+    end
+    Settings.RegisterAddOnCategory(category)
+end
+
 local function LockWhenUnavailable(initializer)
     initializer:AddModifyPredicate(function()
         return addon.CanEdit()
@@ -638,7 +670,9 @@ function addon.InitializeSettings()
                 addon.Print(reason)
             end
         end)
-    LockWhenUnavailable(Settings.CreateCheckbox(category, enabledSetting, L.ENABLE_TOOLTIP))
+    local enabledControl = Settings.CreateCheckbox(category, enabledSetting, L.ENABLE_TOOLTIP)
+    enabledControl:AddSearchTags(L.ADDON_NAME, "CleanBinds")
+    LockWhenUnavailable(enabledControl)
 
     hideMacroNamesSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_HIDE_MACRO_NAMES",
         Settings.VarType.Boolean, L.HIDE_MACRO_NAMES, false, addon.ShouldHideMacroNames, function(value)
@@ -647,7 +681,9 @@ function addon.InitializeSettings()
                 addon.Print(reason)
             end
         end)
-    LockWhenUnavailable(Settings.CreateCheckbox(category, hideMacroNamesSetting, L.HIDE_MACRO_NAMES_TOOLTIP))
+    local macroNamesControl = Settings.CreateCheckbox(category, hideMacroNamesSetting, L.HIDE_MACRO_NAMES_TOOLTIP)
+    macroNamesControl:AddSearchTags(L.ADDON_NAME, "CleanBinds")
+    LockWhenUnavailable(macroNamesControl)
 
     local function GetFontSize()
         return addon.GetKeybindFontSize() or 0
@@ -672,6 +708,7 @@ function addon.InitializeSettings()
     end)
     local fontSlider = Settings.CreateControlInitializer("CleanBindsFontSizeSliderTemplate",
         fontSizeSetting, fontOptions, L.KEYBIND_FONT_SIZE_TOOLTIP)
+    fontSlider:AddSearchTags(L.ADDON_NAME, "CleanBinds")
     LockWhenUnavailable(fontSlider)
     layout:AddInitializer(fontSlider)
     layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsFontPreviewTemplate", {}))
@@ -681,6 +718,9 @@ function addon.InitializeSettings()
         page.category = Settings.RegisterCanvasLayoutSubcategory(category, page, addon.GetBarName(bar))
     end
     Settings.RegisterAddOnCategory(category)
+    for _, page in ipairs(pages) do
+        RegisterBarSearch(page)
+    end
 
     EventRegistry:RegisterCallback("Settings.CategoryDefaulted", function(_, defaultedCategory)
         if defaultedCategory:GetID() == category:GetID() then
