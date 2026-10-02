@@ -64,6 +64,10 @@ Restart WoW and enable **Clean Binds** in the AddOns list.
 3. Click a button's **Custom label** field, enter a label such as `MWD`, and
    press Enter. The label appears on the action button immediately.
 
+Use the Options **Search** field to find **Clean Binds**, an option, or a bar
+or button name such as **Action Bar 2 Button 3**. Choose **Open** on a button
+result to jump to its label row.
+
 Your current keybindings are shown for reference; they cannot be changed here.
 Hover over a binding to see its full name and any additional keys assigned to
 that button.

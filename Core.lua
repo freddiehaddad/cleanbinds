@@ -21,6 +21,7 @@ local function CheckCapabilities()
         "GetBinding", "GetBindingKey", "GetBindingName", "GetBindingText", "GetCurrentBindingSet",
         "IsBindingForGamePad", "GetActionInfo", "ApproximatelyEqual",
         "SaveBindings", "LoadBindings", "SetBinding", "hooksecurefunc", "InCombatLockdown",
+        "CreateSettingsButtonInitializer",
     }) do
         if type(_G[name]) ~= "function" then
             return L.MISSING_API:format(name)
@@ -36,6 +37,10 @@ local function CheckCapabilities()
     end
     if type(EventRegistry) ~= "table" or type(EventRegistry.RegisterCallback) ~= "function" then
         return L.MISSING_API:format("EventRegistry.RegisterCallback")
+    end
+    if (type(SettingsPanel) ~= "table" and type(SettingsPanel) ~= "userdata")
+        or type(SettingsPanel.SelectCategory) ~= "function" then
+        return L.MISSING_API:format("SettingsPanel.SelectCategory")
     end
     for _, name in ipairs({ "Default", "Account", "Character", "Current" }) do
         if type(Enum) ~= "table" or type(Enum.BindingSet) ~= "table"
