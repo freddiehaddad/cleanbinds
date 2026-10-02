@@ -113,6 +113,17 @@ local function loadAddon(options)
     environment.CleanBindsCharacterDB = options.characterDatabase
     environment.SlashCmdList = {}
     environment.Settings = {}
+    environment.EventRegistry = { callbacks = {} }
+    function environment.EventRegistry:RegisterCallback(event, callback, owner)
+        local callbacks = self.callbacks[event] or {}
+        self.callbacks[event] = callbacks
+        callbacks[#callbacks + 1] = { callback = callback, owner = owner }
+    end
+    function environment.EventRegistry:TriggerEvent(event, ...)
+        for _, entry in ipairs(self.callbacks[event] or {}) do
+            entry.callback(entry.owner, ...)
+        end
+    end
     environment.NumberFontNormalSmallGray = mockFontObject()
     environment.MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }
     environment.Enum = { BindingSet = { Default = 0, Account = 1, Character = 2, Current = 3 } }
@@ -759,16 +770,24 @@ local function readySettings(options)
                 SetValueChangedCallback = noop,
             }
             environment.Settings.VarType = { Boolean = "boolean", Number = "number" }
+            game.categories, game.settings = {}, {}
+            local function category()
+                local result = { id = #game.categories + 1 }
+                function result:GetID() return self.id end
+                game.categories[#game.categories + 1] = result
+                return result
+            end
             environment.Settings.RegisterVerticalLayoutCategory = function()
-                return {}, { AddInitializer = noop }
+                return category(), { AddInitializer = noop }
             end
             environment.Settings.RegisterCanvasLayoutSubcategory = function(_, page)
                 pages[#pages + 1] = page
-                return {}
+                return category()
             end
             environment.Settings.RegisterAddOnCategory = noop
-            environment.Settings.RegisterProxySetting = function(_, variable, variableType, _, default, getter, setter)
+            environment.Settings.RegisterProxySetting = function(category, variable, variableType, _, default, getter, setter)
                 local setting = { variable = variable, variableType = variableType, default = default, updates = 0, writes = 0 }
+                game.settings[setting] = category
                 setting.GetValueDerived = getter
                 function setting:SetValueDerived(value)
                     self.writes = self.writes + 1
@@ -915,7 +934,6 @@ local function readySettings(options)
                 end
                 return initializer
             end
-            environment.CreateSettingsButtonInitializer = function() return initializer end
             environment.StaticPopupDialogs = {}
             environment.StaticPopup_Show = function(which, text, _, data)
                 game.popup = { which = which, text = text, data = data }
@@ -923,6 +941,35 @@ local function readySettings(options)
             environment.StaticPopup_Hide = function(which)
                 if game.popup and game.popup.which == which then
                     game.popup = nil
+                end
+            end
+            function game.ResetBar(page)
+                page.Reset:OnClick()
+                local popup = assert(game.popup)
+                game.popup = nil
+                environment.StaticPopupDialogs[popup.which].OnAccept(nil, popup.data)
+            end
+            function game.DefaultSettings(choice, category)
+                if choice == "cancel" then
+                    return
+                end
+                assert(choice == "all" or choice == "these")
+                for setting, owner in pairs(game.settings) do
+                    if choice == "all" or owner == category then
+                        setting:SetValueToDefault()
+                    end
+                end
+                for _, page in ipairs(pages) do
+                    if (choice == "all" or page.category == category) and page.OnDefault then
+                        page:OnDefault()
+                    end
+                end
+                if choice == "all" then
+                    game.defaultBindingLoads = (game.defaultBindingLoads or 0) + 1
+                    game.Load(0)
+                    environment.EventRegistry:TriggerEvent("Settings.Defaulted")
+                else
+                    environment.EventRegistry:TriggerEvent("Settings.CategoryDefaulted", category)
                 end
             end
             environment.GameTooltip = { Hide = noop }
@@ -1895,21 +1942,18 @@ test("profile switches cancel drafts and update the native enable proxy without 
     equal(page.Description:GetText(), addon.L.ACCOUNT_NOTICE)
 end)
 
-test("stale reset confirmations cannot clear a new or revisited scope", function()
-    local env, addon, _, pages, _, game = readySettings()
+test("stale reset tokens cannot clear a new or revisited scope", function()
+    local _, addon, _, pages, _, game = readySettings()
     local page = pages[1]
     page:Show()
     assert(addon.SetLabel(page.bar, 1, "Account"))
-    page.Reset:OnClick()
-    local stale = game.popup
-    assert(stale.text:find(addon.L.ACCOUNT_SCOPE, 1, true))
+    local token = addon.GetScopeToken()
     game.Switch(2)
-    equal(game.popup, nil)
     assert(addon.SetLabel(page.bar, 1, "Character"))
-    env.StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET.OnAccept(nil, stale.data)
+    equal(addon.ResetLabels(page.bar.id, token), false)
     equal(addon.GetLabel(page.bar, 1), "Character")
     game.Switch(1)
-    env.StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET.OnAccept(nil, stale.data)
+    equal(addon.ResetLabels(page.bar.id, token), false)
     equal(addon.GetLabel(page.bar, 1), "Account")
 end)
 
@@ -3314,6 +3358,353 @@ test("font styling waits for startup scope and attaches late buttons without cha
     equal(#button.scripts.OnShow, 1)
     assert(addon.SetKeybindFontSize(nil))
     equal(select(2, button.HotKey:GetFont()), 11)
+end)
+
+test("These Settings on the main page resets labels and options in the active setup only", function()
+    for _, scope in ipairs({ 1, 2 }) do
+        local env, addon, _, pages, _, game = readySettings()
+        assert(addon.SetLabel(addon.Bars[1], 1, "Shared"))
+        assert(addon.SetLabel(addon.Bars[2], 1, "Shared two"))
+        assert(addon.SetEnabled(false))
+        assert(addon.SetHideMacroNames(true))
+        assert(addon.SetKeybindFontSize(14))
+        game.Switch(2)
+        assert(addon.SetLabel(addon.Bars[1], 1, "Character"))
+        assert(addon.SetLabel(addon.Bars[2], 1, "Character two"))
+        assert(addon.SetKeybindFontSize(13))
+        game.Switch(scope)
+        local active = addon.db
+        local inactive = scope == 1 and env.CleanBindsCharacterDB or env.CleanBindsDB
+        local inactiveLabel = inactive.overrides["actionbar1:1"]
+        local inactiveSize = inactive.keybindFontSize
+
+        game.DefaultSettings("these", addon.category)
+        equal(addon.db, active)
+        equal(next(active.overrides), nil)
+        equal(next(active.bindingSnapshots), nil)
+        equal(active.enabled, true)
+        equal(active.hideMacroNames, false)
+        equal(active.keybindFontSize, nil)
+        equal(addon.GetLabel(addon.Bars[1], 1), nil)
+        equal(addon.GetLabel(addon.Bars[2], 1), nil)
+        equal(inactive.overrides["actionbar1:1"], inactiveLabel)
+        equal(inactive.enabled, false)
+        equal(inactive.hideMacroNames, true)
+        equal(inactive.keybindFontSize, inactiveSize)
+        equal(game.enabledSetting.displayedValue, true)
+        equal(game.hideMacroNamesSetting.displayedValue, false)
+        equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+        equal(game.fontPreview.Reset.enabled, false)
+        game.Flush()
+        equal(next(active.overrides), nil)
+        equal(pages[1].rows[1].Override:GetText(), addon.L.DEFAULT_LABEL)
+    end
+end)
+
+test("Reset This Bar resets only that bar and leaves the appearance controls alone", function()
+    local env, addon, _, pages, _, game = readySettings()
+    assert(addon.SetEnabled(false))
+    assert(addon.SetHideMacroNames(true))
+    assert(addon.SetKeybindFontSize(14))
+    for _, selected in ipairs(pages) do
+        for _, page in ipairs(pages) do
+            assert(addon.SetLabel(page.bar, 1, page.bar.id))
+        end
+        game.ResetBar(selected)
+        for _, page in ipairs(pages) do
+            local id = page.bar.id .. ":1"
+            local label = page ~= selected and page.bar.id or nil
+            equal(addon.GetLabel(page.bar, 1), label)
+            equal(env.CleanBindsDB.overrides[id], label)
+            equal(env.CleanBindsDB.bindingSnapshots[id] ~= nil, page ~= selected)
+        end
+        equal(addon.db.enabled, false)
+        equal(addon.ShouldHideMacroNames(), true)
+        equal(addon.GetKeybindFontSize(), 14)
+        equal(game.enabledSetting.writes, 0)
+        equal(game.hideMacroNamesSetting.writes, 0)
+        equal(game.fontSizeSetting.writes, 0)
+        equal(game.defaultBindingLoads, nil)
+    end
+end)
+
+test("All Settings resets the active addon setup once and retains the inactive setup", function()
+    for _, scope in ipairs({ 1, 2 }) do
+        local env, addon, _, pages, _, game = readySettings({
+            savedBindings = { [0] = { ACTIONBUTTON1 = { "1" } } },
+        })
+        assert(addon.SetLabel(addon.Bars[1], 1, "Account"))
+        assert(addon.SetEnabled(false))
+        assert(addon.SetHideMacroNames(true))
+        assert(addon.SetKeybindFontSize(14))
+        game.Switch(2)
+        assert(addon.SetLabel(addon.Bars[1], 1, "Character"))
+        assert(addon.SetLabel(addon.Bars[9], 1, "Pet"))
+        assert(addon.SetKeybindFontSize(13))
+        game.Switch(scope)
+        local active = addon.db
+        local inactive = scope == 1 and env.CleanBindsCharacterDB or env.CleanBindsDB
+        local inactiveLabel = inactive.overrides["actionbar1:1"]
+        local inactiveSize = inactive.keybindFontSize
+        local calls, reset = 0, addon.ResetLabels
+        addon.ResetLabels = function(...)
+            calls = calls + 1
+            return reset(...)
+        end
+
+        game.DefaultSettings("all", scope == 1 and pages[2].category or { GetID = function() return -1 end })
+        game.Flush()
+        equal(calls, 1)
+        equal(addon.db, active)
+        equal(next(active.overrides), nil)
+        equal(next(active.bindingSnapshots), nil)
+        equal(active.enabled, true)
+        equal(active.hideMacroNames, false)
+        equal(active.keybindFontSize, nil)
+        equal(inactive.overrides["actionbar1:1"], inactiveLabel)
+        equal(inactive.enabled, false)
+        equal(inactive.hideMacroNames, true)
+        equal(inactive.keybindFontSize, inactiveSize)
+        equal(game.bindingSet, scope)
+        equal(game.bindings.ACTIONBUTTON1[1], "1")
+        equal(game.defaultBindingLoads, 1)
+        game.Save()
+        game.Flush()
+        equal(next(active.overrides), nil)
+        equal(calls, 1)
+    end
+end)
+
+test("confirmed resets discard affected drafts before they can be committed again", function()
+    for _, target in ipairs({ "bar", "main", "all" }) do
+        local _, addon, _, pages, _, game = readySettings()
+        local page, other = pages[1], pages[2]
+        page:Show()
+        other:Show()
+        assert(addon.SetLabel(page.bar, 1, "Old"))
+        assert(addon.SetLabel(other.bar, 1, "Other"))
+        local row, otherRow = page.rows[1], other.rows[1]
+        row.Override:OnClick()
+        row.Editor:SetText("Do not restore")
+        otherRow.Override:OnClick()
+        otherRow.Editor:SetText("Other draft")
+        if target == "bar" then
+            game.ResetBar(page)
+        else
+            game.DefaultSettings(target == "all" and "all" or "these", addon.category)
+        end
+
+        equal(page.editingRow, nil)
+        equal(row.Editor:IsShown(), false)
+        equal(row.Editor.focused, false)
+        equal(row.Override:GetText(), addon.L.DEFAULT_LABEL)
+        row.Editor:OnEnterPressed()
+        row.Editor:OnEditFocusLost()
+        page:OnCommit()
+        page:Hide()
+        equal(addon.GetLabel(page.bar, 1), nil)
+        if target == "bar" then
+            equal(other.editingRow, otherRow)
+            equal(addon.GetLabel(other.bar, 1), "Other")
+            other:OnCommit()
+            equal(addon.GetLabel(other.bar, 1), "Other draft")
+        else
+            equal(other.editingRow, nil)
+            other:OnCommit()
+            equal(addon.GetLabel(other.bar, 1), nil)
+        end
+    end
+end)
+
+test("Cancel and These Settings for another category leave Clean Binds unchanged", function()
+    local env, addon, _, pages, _, game = readySettings()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Keep"))
+    assert(addon.SetEnabled(false))
+    assert(addon.SetHideMacroNames(true))
+    assert(addon.SetKeybindFontSize(14))
+    local page = pages[1]
+    page:Show()
+    page.rows[1].Override:OnClick()
+    page.rows[1].Editor:SetText("Draft")
+    local unrelated = env.Settings.RegisterVerticalLayoutCategory("Other addon")
+    game.DefaultSettings("cancel", addon.category)
+    game.DefaultSettings("these", unrelated)
+    equal(addon.GetLabel(page.bar, 1), "Keep")
+    equal(page.editingRow, page.rows[1])
+    equal(page.rows[1].Editor:GetText(), "Draft")
+    equal(addon.db.enabled, false)
+    equal(addon.ShouldHideMacroNames(), true)
+    equal(addon.GetKeybindFontSize(), 14)
+    equal(game.defaultBindingLoads, nil)
+end)
+
+test("native category resets match stable category IDs", function()
+    local env, addon = readySettings()
+    assert(addon.SetLabel(addon.Bars[1], 1, "First"))
+    assert(addon.SetLabel(addon.Bars[2], 1, "Second"))
+    local category = { GetID = function() return addon.category:GetID() end }
+    env.EventRegistry:TriggerEvent("Settings.CategoryDefaulted", category)
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(addon.GetLabel(addon.Bars[2], 1), nil)
+end)
+
+test("native resets stay read-only during combat or an unresolved binding scope", function()
+    for _, condition in ipairs({ "combat", "loading", "unknown" }) do
+        for _, target in ipairs({ "bar", "main", "all" }) do
+            local env, addon, _, pages, messages, game = readySettings()
+            assert(addon.SetLabel(addon.Bars[1], 1, "Keep"))
+            assert(addon.SetEnabled(false))
+            assert(addon.SetHideMacroNames(true))
+            assert(addon.SetKeybindFontSize(14))
+            local saved = env.CleanBindsDB
+            if condition == "combat" then
+                game.combat = true
+            elseif condition == "loading" then
+                game.Load(2)
+            else
+                game.Save(99)
+            end
+            if target == "bar" then
+                pages[1].Reset:OnClick()
+                equal(game.popup, nil)
+            else
+                game.DefaultSettings(target == "all" and "all" or "these", addon.category)
+            end
+            equal(saved.overrides["actionbar1:1"], "Keep")
+            assert(saved.bindingSnapshots["actionbar1:1"])
+            equal(saved.enabled, false)
+            equal(saved.hideMacroNames, true)
+            equal(saved.keybindFontSize, 14)
+            assert(#messages > 0)
+            if condition == "combat" then
+                equal(messages[#messages], addon.L.ADDON_NAME .. ": " .. addon.L.COMBAT_READ_ONLY)
+                equal(game.enabledSetting.displayedValue, false)
+                equal(game.hideMacroNamesSetting.displayedValue, true)
+                equal(game.fontSlider.value, 14)
+            end
+        end
+    end
+end)
+
+test("a scope change during draft cancellation cannot redirect a bar reset", function()
+    local env, addon, _, pages, messages, game = readySettings()
+    local page = pages[1]
+    assert(addon.SetLabel(page.bar, 1, "Account"))
+    game.Switch(2)
+    assert(addon.SetLabel(page.bar, 1, "Character"))
+    game.Switch(1)
+    page:Show()
+    local row = page.rows[1]
+    row.Override:OnClick()
+    row.Editor:SetText("Draft")
+    local clearFocus = row.Editor.ClearFocus
+    row.Editor.ClearFocus = function(self)
+        clearFocus(self)
+        game.Switch(2)
+    end
+    game.ResetBar(page)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Account")
+    equal(env.CleanBindsCharacterDB.overrides["actionbar1:1"], "Character")
+    equal(addon.db, env.CleanBindsCharacterDB)
+    equal(messages[#messages], addon.L.ADDON_NAME .. ": " .. addon.L.SCOPE_CHANGED)
+end)
+
+test("resetting a bar removes unverified labels so later binding reads cannot restore them", function()
+    local env, addon, fire, pages, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    assert(addon.SetLabel(addon.Bars[1], 1, "Keep until reset"))
+    game.unavailableBinding = "ACTIONBUTTON1"
+    game.Save()
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], "Keep until reset")
+    game.ResetBar(pages[1])
+    equal(env.CleanBindsDB.overrides["actionbar1:1"], nil)
+    equal(env.CleanBindsDB.bindingSnapshots["actionbar1:1"], nil)
+    game.unavailableBinding = nil
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+end)
+
+test("native main reset restores text, appearance, and keeps the bar and font-only reset controls", function()
+    local env, addon, fire, pages, _, game = readySettings({
+        bindings = { ACTIONBUTTON1 = { "F" } }, actions = { [1] = "macro" },
+    })
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    assert(addon.SetHideMacroNames(true))
+    assert(addon.SetKeybindFontSize(14))
+    equal(button.HotKey:GetText(), "Custom")
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(button.Name.alpha, 0)
+    game.DefaultSettings("these", addon.category)
+    equal(button.HotKey:GetText(), "F")
+    equal(select(2, button.HotKey:GetFont()), 11)
+    equal(button.Name.alpha, 0.8)
+    for _, page in ipairs(pages) do
+        equal(page.Reset:GetText(), addon.L.RESET_BAR)
+    end
+    assert(env.StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET)
+    assert(game.fontPreview.Reset)
+end)
+
+test("bar reset confirmation can be canceled and is invalidated by scope changes", function()
+    local env, addon, _, pages, _, game = readySettings()
+    local page = pages[1]
+    assert(addon.SetLabel(page.bar, 1, "Account"))
+    page.Reset:OnClick()
+    local popup = game.popup
+    assert(popup.text:find(addon.L.ACCOUNT_SCOPE, 1, true))
+    local dialog = env.StaticPopupDialogs[popup.which]
+    dialog.OnCancel()
+    game.popup = nil
+    equal(addon.GetLabel(page.bar, 1), "Account")
+    page.Reset:OnClick()
+    local stale = game.popup
+    game.Switch(2)
+    equal(game.popup, nil)
+    assert(addon.SetLabel(page.bar, 1, "Character"))
+    dialog.OnAccept(nil, stale.data)
+    equal(addon.GetLabel(page.bar, 1), "Character")
+    game.Switch(1)
+    dialog.OnAccept(nil, stale.data)
+    equal(addon.GetLabel(page.bar, 1), "Account")
+end)
+
+test("a native full reset dismisses an outstanding bar reset confirmation", function()
+    local _, addon, _, pages, _, game = readySettings()
+    assert(addon.SetLabel(addon.Bars[1], 1, "First"))
+    pages[1].Reset:OnClick()
+    assert(game.popup)
+    game.DefaultSettings("these", addon.category)
+    equal(game.popup, nil)
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+end)
+
+test("labels reset even when all three native controls already have default values", function()
+    local _, addon, _, _, _, game = readySettings()
+    assert(addon.SetLabel(addon.Bars[1], 1, "Only label changed"))
+    game.DefaultSettings("these", addon.category)
+    equal(addon.GetLabel(addon.Bars[1], 1), nil)
+    equal(game.enabledSetting.writes, 0)
+    equal(game.hideMacroNamesSetting.writes, 0)
+    equal(game.fontSizeSetting.writes, 0)
+end)
+
+test("missing native Settings callbacks fail without writing saved data", function()
+    local env, addon, fire, messages = loadAddon({
+        loggedIn = true,
+        setup = function(environment)
+            environment.EventRegistry.RegisterCallback = nil
+        end,
+    })
+    fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.state, "failed")
+    equal(env.CleanBindsDB, nil)
+    equal(env.CleanBindsCharacterDB, nil)
+    assert(messages[1]:find("EventRegistry.RegisterCallback", 1, true))
 end)
 
 print(("%d tests passed"):format(passed))

@@ -426,23 +426,42 @@ local function RefreshPages()
 end
 addon.RefreshSettings = RefreshPages
 
-local function ResetLabels(barID, token)
-    local success, reason = addon.ResetLabels(barID, token)
-    if not success then
+local function ResetLabels(barID, expectedToken)
+    local token = expectedToken or addon.GetScopeToken()
+    local allowed, reason = addon.CanEdit(token)
+    if not allowed then
         addon.Print(reason)
+        RefreshPages()
+        return
+    end
+    if pendingReset and (not barID or pendingReset.barID == barID) then
+        pendingReset = nil
+        StaticPopup_Hide("CLEANBINDS_CONFIRM_RESET")
+    end
+    for _, page in ipairs(pages) do
+        if not barID or page.bar.id == barID then
+            SetNotice(page, nil)
+            if page.editingRow then
+                CloseEditor(page.editingRow)
+            end
+        end
+    end
+    local success, resetError = addon.ResetLabels(barID, token)
+    if not success then
+        addon.Print(resetError)
+        RefreshPages()
     end
 end
 
-local function ConfirmReset(bar)
+local function ConfirmBarReset(bar)
     local allowed, reason = addon.CanEdit()
     if not allowed then
         addon.Print(reason)
         return
     end
-    local scope = addon.GetScopeName()
-    local message = bar and L.RESET_BAR_CONFIRM:format(addon.GetBarName(bar), scope) or L.RESET_ALL_CONFIRM:format(scope)
-    pendingReset = { barID = bar and bar.id, scopeToken = addon.GetScopeToken() }
-    StaticPopup_Show("CLEANBINDS_CONFIRM_RESET", message, nil, pendingReset)
+    pendingReset = { barID = bar.id, scopeToken = addon.GetScopeToken() }
+    StaticPopup_Show("CLEANBINDS_CONFIRM_RESET",
+        L.RESET_BAR_CONFIRM:format(addon.GetBarName(bar), addon.GetScopeName()), nil, pendingReset)
 end
 
 function addon.CancelScopeInteractions()
@@ -574,7 +593,7 @@ local function CreatePage(bar)
     page.Reset:SetPoint("BOTTOMRIGHT", -16, 8)
     page.Reset:SetText(L.RESET_BAR)
     page.Reset:SetScript("OnClick", function()
-        ConfirmReset(bar)
+        ConfirmBarReset(bar)
     end)
     for index = 1, bar.buttonCount do
         CreateRow(page, index)
@@ -657,17 +676,20 @@ function addon.InitializeSettings()
     layout:AddInitializer(fontSlider)
     layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsFontPreviewTemplate", {}))
 
-    local reset = CreateSettingsButtonInitializer("", L.RESET_ALL, function()
-        ConfirmReset()
-    end, L.RESET_TOOLTIP, true)
-    LockWhenUnavailable(reset)
-    layout:AddInitializer(reset)
-
     for _, bar in ipairs(addon.Bars) do
         local page = CreatePage(bar)
         page.category = Settings.RegisterCanvasLayoutSubcategory(category, page, addon.GetBarName(bar))
     end
     Settings.RegisterAddOnCategory(category)
+
+    EventRegistry:RegisterCallback("Settings.CategoryDefaulted", function(_, defaultedCategory)
+        if defaultedCategory:GetID() == category:GetID() then
+            ResetLabels()
+        end
+    end, addon)
+    EventRegistry:RegisterCallback("Settings.Defaulted", function()
+        ResetLabels()
+    end, addon)
 
     StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET = {
         text = "%s",

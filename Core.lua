@@ -34,6 +34,9 @@ local function CheckCapabilities()
     if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
         return L.MISSING_API:format("C_Timer.After")
     end
+    if type(EventRegistry) ~= "table" or type(EventRegistry.RegisterCallback) ~= "function" then
+        return L.MISSING_API:format("EventRegistry.RegisterCallback")
+    end
     for _, name in ipairs({ "Default", "Account", "Character", "Current" }) do
         if type(Enum) ~= "table" or type(Enum.BindingSet) ~= "table"
             or type(Enum.BindingSet[name]) ~= "number" then

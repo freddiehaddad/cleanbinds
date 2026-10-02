@@ -80,7 +80,7 @@ Changes are saved automatically when you reload the UI or log out.
 Enable **Hide macro names** on the main Clean Binds settings page to hide them
 on all supported action bars. Names in the macro window and tooltips are
 unchanged. This works independently of **Enable custom labels**; uncheck it
-to show names again. Resetting labels does not change this preference.
+to show names again. **Reset This Bar** leaves this preference unchanged.
 
 ## Keybinding font size
 
@@ -91,7 +91,7 @@ restores each button's native font size.
 
 This applies to both native and custom keybind labels, even with **Enable custom
 labels** unchecked. Macro names, cooldown text, and button sizes are unchanged.
-**Reset This Bar** and **Reset All Labels** leave the font-size setting alone.
+**Reset This Bar** leaves the font-size setting alone.
 
 ## Account-wide and character-specific labels
 
@@ -116,12 +116,24 @@ Switching back to account-wide bindings restores your shared labels. It does not
 copy character-only labels into the shared setup. Each setup retains its labels
 for when you return to it, provided the keybindings still match.
 
-## Changing and resetting labels
+## Changing and resetting settings
 
 Clear a **Custom label** field to restore WoW's default text for that button.
-Use **Reset This Bar** or **Reset All Labels** to clear more labels at once.
-Both ask for confirmation and affect **only the setup shown on the page**. An
-account-wide reset leaves independent character labels untouched.
+
+On an action-bar page, **Reset This Bar** clears only that bar's custom labels
+after confirmation. Other bars, font size, and macro-name visibility are
+unchanged.
+
+To reset the entire active Clean Binds setup, select the main **Clean Binds**
+page, click **Defaults**, and choose **These Settings**. This clears all custom
+labels, enables custom labels, shows macro names, and restores native font sizing.
+
+Both affect **only the active account-wide or character-specific setup**.
+An account-wide reset leaves independent character settings untouched.
+**Cancel** leaves settings unchanged.
+
+**All Settings** also resets WoW's settings and keybindings and participating
+addon settings. Choose **These Settings** to reset only Clean Binds.
 
 Uncheck **Enable custom labels** to use WoW's default text without deleting your
 labels. Each setup remembers its own on/off setting.
