@@ -26,6 +26,67 @@ local function equal(actual, expected)
     assert(actual == expected, ("expected %s, got %s"):format(tostring(expected), tostring(actual)))
 end
 
+local function mockFontObject(size, font, flags)
+    local object = { size = size or 11, font = font or "Fonts\\Native.ttf", flags = flags or "OUTLINE" }
+    function object:GetFont()
+        return self.font, self.size, self.flags
+    end
+    return object
+end
+
+local function addFontMethods(object)
+    object.fontObject = mockFontObject()
+    object.fontWrites, object.heightWrites = 0, 0
+    object.width, object.height = 32, 10
+    object.color, object.shadow = { 0.6, 0.6, 0.6, 1 }, { 0, 0, 0, 1 }
+    function object:GetFont()
+        if self.font then
+            return self.font[1], self.font[2], self.font[3]
+        end
+        return self.fontObject:GetFont()
+    end
+    function object:GetFontObject()
+        return self.fontObject
+    end
+    function object:SetFont(font, size, flags)
+        if self.rejectFont then
+            error("Rejected font write")
+        end
+        self.font = { font, size, flags }
+        self.fontWrites = self.fontWrites + 1
+    end
+    function object:SetFontObject(font)
+        self.fontObject = font
+        self.font = nil
+    end
+    function object:GetHeight() return self.height end
+    function object:GetWidth() return self.width end
+    function object:GetSize() return self.width, self.height end
+    function object:SetHeight(height)
+        self.height = height
+        self.heightWrites = self.heightWrites + 1
+    end
+    function object:SetWidth(width) self.width = width end
+    function object:SetSize(width, height) self.width, self.height = width, height end
+    function object:GetJustifyH() return self.justifyH or "RIGHT" end
+    function object:GetJustifyV() return self.justifyV or "MIDDLE" end
+    function object:SetJustifyH(value) self.justifyH = value end
+    function object:SetJustifyV(value) self.justifyV = value end
+    function object:GetTextColor() return unpackValues(self.color) end
+    function object:SetTextColor(...) self.color = { ... } end
+    function object:GetShadowColor() return unpackValues(self.shadow) end
+    function object:SetShadowColor(...) self.shadow = { ... } end
+    function object:GetShadowOffset() return 1, -1 end
+    function object:SetShadowOffset() end
+    function object:GetStringWidth()
+        local _, size = self:GetFont()
+        return #(self.text or "") * size * 0.6
+    end
+    function object:IsTruncated()
+        return self:GetStringWidth() > self.width
+    end
+end
+
 local function test(name, callback)
     callback()
     passed = passed + 1
@@ -52,6 +113,8 @@ local function loadAddon(options)
     environment.CleanBindsCharacterDB = options.characterDatabase
     environment.SlashCmdList = {}
     environment.Settings = {}
+    environment.NumberFontNormalSmallGray = mockFontObject()
+    environment.MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }
     environment.Enum = { BindingSet = { Default = 0, Account = 1, Character = 2, Current = 3 } }
     environment.C_KeyBindings = { GetBindingContextForAction = function() end }
     local bindingCommands, bindingIndices = {}, {}
@@ -70,6 +133,9 @@ local function loadAddon(options)
         return key:match("PAD") ~= nil
     end
     environment.RANGE_INDICATOR = "*"
+    environment.ApproximatelyEqual = function(first, second, epsilon)
+        return math.abs(first - second) < (epsilon or 0.000001)
+    end
     environment.issecretvalue = function(value)
         return type(value) == "table" and value.secret == true
     end
@@ -135,7 +201,7 @@ local function loadAddon(options)
     for _, name in ipairs({
         "RegisterAddOnCategory", "RegisterVerticalLayoutCategory",
         "RegisterCanvasLayoutSubcategory", "RegisterProxySetting",
-        "CreateCheckbox", "OpenToCategory",
+        "CreateCheckbox", "CreateControlInitializer", "CreateSliderOptions", "OpenToCategory",
     }) do
         environment.Settings[name] = function()
             error("The foundation must not call Settings." .. name)
@@ -585,6 +651,7 @@ local function readySettings(options)
             local createFrame = environment.CreateFrame
             local function widget(frameType, name, parent, template)
                 local frame = createFrame()
+                addFontMethods(frame)
                 frame.shown = true
                 frame.text = ""
                 frame.width, frame.height = 600, 400
@@ -593,7 +660,7 @@ local function readySettings(options)
                 -- Layout is not simulated; interaction methods below are explicit.
                 for _, method in ipairs({
                     "SetPoint", "ClearAllPoints", "SetAllPoints", "SetJustifyH",
-                    "SetWordWrap", "SetFontObject", "SetScale", "SetMaxLines",
+                    "SetWordWrap", "SetScale", "SetMaxLines",
                     "SetAtlas", "SetHideIfUnscrollable", "HighlightText", "SetScrollChild",
                 }) do
                     frame[method] = noop
@@ -606,9 +673,6 @@ local function readySettings(options)
                 end
                 function frame:GetText()
                     return self.text
-                end
-                function frame:IsTruncated()
-                    return false
                 end
                 function frame:SetWidth(width)
                     self.width = width
@@ -694,7 +758,7 @@ local function readySettings(options)
                 AddEvaluateStateCVar = noop,
                 SetValueChangedCallback = noop,
             }
-            environment.Settings.VarType = { Boolean = "boolean" }
+            environment.Settings.VarType = { Boolean = "boolean", Number = "number" }
             environment.Settings.RegisterVerticalLayoutCategory = function()
                 return {}, { AddInitializer = noop }
             end
@@ -703,23 +767,54 @@ local function readySettings(options)
                 return {}
             end
             environment.Settings.RegisterAddOnCategory = noop
-            environment.Settings.RegisterProxySetting = function(_, variable, _, _, _, getter, setter)
-                local setting = { variable = variable, updates = 0, writes = 0 }
-                function setting:GetValue()
-                    return getter()
-                end
-                function setting:SetValue(value)
+            environment.Settings.RegisterProxySetting = function(_, variable, variableType, _, default, getter, setter)
+                local setting = { variable = variable, variableType = variableType, default = default, updates = 0, writes = 0 }
+                setting.GetValueDerived = getter
+                function setting:SetValueDerived(value)
                     self.writes = self.writes + 1
                     setter(value)
                 end
+                function setting:GetValue()
+                    return getter()
+                end
+                function setting:TriggerValueChanged(value)
+                    self.displayedValue = value
+                    if self.onValueChanged then
+                        self.onValueChanged(value)
+                    end
+                end
+                function setting:ApplyValue(value)
+                    if getter() ~= value then
+                        equal(type(value), variableType)
+                        self.locked = true
+                        self:SetValueDerived(value)
+                        self.locked = false
+                    end
+                    -- Native settings notify with the requested value, not the getter's result.
+                    self:TriggerValueChanged(value)
+                end
+                function setting:SetValue(value)
+                    if not self.locked then
+                        self:ApplyValue(value)
+                    end
+                end
+                function setting:SetValueToDefault()
+                    if self.default == nil then
+                        return false
+                    end
+                    self:ApplyValue(self.default)
+                    return true
+                end
                 function setting:NotifyUpdate()
                     self.updates = self.updates + 1
-                    self.displayedValue = getter()
+                    self:TriggerValueChanged(getter())
                 end
                 if variable == "CLEANBINDS_ENABLED" then
                     game.enabledSetting = setting
                 elseif variable == "CLEANBINDS_HIDE_MACRO_NAMES" then
                     game.hideMacroNamesSetting = setting
+                elseif variable == "CLEANBINDS_KEYBIND_FONT_SIZE" then
+                    game.fontSizeSetting = setting
                 else
                     error("Unexpected proxy setting: " .. variable)
                 end
@@ -734,8 +829,90 @@ local function readySettings(options)
                 game.checkboxes[setting.variable] = checkbox
                 return checkbox
             end
-            environment.Settings.CreateElementInitializer = function(_, data)
-                game.description = data.text
+            environment.Settings.CreateSliderOptions = function(minValue, maxValue, rate)
+                local options = { minValue = minValue, maxValue = maxValue, steps = (maxValue - minValue) / rate }
+                function options:SetLabelFormatter(labelType, formatter)
+                    self.formatters = { [labelType] = formatter }
+                end
+                return options
+            end
+            environment.SettingsSliderControlMixin = {
+                Init = function(self, controlInitializer)
+                    self.initializer = controlInitializer
+                    local setting, options = controlInitializer.setting, controlInitializer.options
+                    setting.onValueChanged = function(value)
+                        self:OnSettingValueChanged(setting, value)
+                    end
+                    self.SliderWithSteppers:Init(setting:GetValue(),
+                        options.minValue, options.maxValue, options.steps, options.formatters)
+                    self.SliderWithSteppers.onValueChanged = function(value)
+                        self:OnSliderValueChanged(value)
+                    end
+                    self:EvaluateState()
+                end,
+                GetSetting = function(self) return self.initializer.setting end,
+                SetValue = function(self, value) self.SliderWithSteppers:SetValue(value) end,
+                OnSettingValueChanged = function(self, _, value) self:SetValue(value) end,
+                OnSliderValueChanged = function(self, value) self:GetSetting():SetValue(value) end,
+                DisplayEnabled = function(self, enabled) self.enabled = enabled end,
+                EvaluateState = function(self)
+                    local enabled = not self.initializer.canModify or self.initializer.canModify()
+                    self.SliderWithSteppers:SetEnabled(enabled)
+                    self:DisplayEnabled(enabled)
+                end,
+            }
+            environment.Settings.CreateControlInitializer = function(template, setting, options)
+                equal(template, "CleanBindsFontSizeSliderTemplate")
+                local controlInitializer = copyTable(initializer)
+                controlInitializer.setting, controlInitializer.options = setting, options
+                function controlInitializer:AddModifyPredicate(predicate) self.canModify = predicate end
+                local slider = {}
+                function slider:FormatValue(value)
+                    self.label = self.options.formatters[1](value)
+                end
+                function slider:Init(value, minValue, maxValue, steps, formatters)
+                    self.options = { minValue = minValue, maxValue = maxValue, steps = steps, formatters = formatters }
+                    self:SetValue(value)
+                    self:FormatValue(value)
+                end
+                function slider:SetValue(value)
+                    value = math.max(self.options.minValue, math.min(self.options.maxValue, value))
+                    if self.value ~= value then
+                        self.value = value
+                        self:FormatValue(value)
+                        if self.onValueChanged then
+                            self.onValueChanged(value)
+                        end
+                    end
+                end
+                function slider:SetEnabled(enabled) self.enabled = enabled end
+                slider.canModify = function() return controlInitializer.canModify() end
+                local control = { SliderWithSteppers = slider }
+                for key, method in pairs(environment.SettingsSliderControlMixin) do
+                    control[key] = method
+                end
+                for key, method in pairs(environment.CleanBindsFontSizeSliderMixin) do
+                    control[key] = method
+                end
+                game.fontSlider = slider
+                game.fontSliderControl = control
+                control:Init(controlInitializer)
+                return controlInitializer
+            end
+            environment.Settings.CreateElementInitializer = function(template, data)
+                if template == "CleanBindsDescriptionTemplate" then
+                    game.description = data.text
+                elseif template == "CleanBindsFontPreviewTemplate" then
+                    local preview = widget()
+                    for key, method in pairs(environment.CleanBindsFontPreviewMixin) do
+                        preview[key] = method
+                    end
+                    preview:OnLoad()
+                    preview:Init()
+                    game.fontPreview = preview
+                else
+                    error("Unexpected initializer: " .. template)
+                end
                 return initializer
             end
             environment.CreateSettingsButtonInitializer = function() return initializer end
@@ -1168,6 +1345,7 @@ end)
 
 local function mockButton(name, text, shown)
     local hotkey = { text = text, shown = shown ~= false, alpha = 0.8, writes = 0 }
+    addFontMethods(hotkey)
     function hotkey:GetText()
         return self.text
     end
@@ -1182,6 +1360,10 @@ local function mockButton(name, text, shown)
         return self.forbidden or false
     end
     local button = { HotKey = hotkey, scripts = {} }
+    function hotkey:GetNumPoints() return 1 end
+    function hotkey:GetPoint() return "TOPRIGHT", button, "TOPRIGHT", -4, -5 end
+    function button:GetSize() return 45, 45 end
+    function button:GetNormalTexture() return nil end
     function button:GetName()
         return name
     end
@@ -2402,6 +2584,736 @@ test("failed macro visibility writes release the recursion guard and remain reco
     button.Name:SetAlpha(0.3)
     assert(addon.SetHideMacroNames(false))
     equal(button.Name.alpha, 0.3)
+end)
+
+local function fontProfile(size)
+    local profile = macroProfile(false)
+    profile.keybindFontSize = size
+    return profile
+end
+
+local function readyFont(size, button)
+    button = button or mockButton("ActionButton1", "F")
+    local env, addon, fire, messages, game = ready({
+        database = fontProfile(size),
+        bindings = { ACTIONBUTTON1 = { "F" } },
+        setup = function(environment)
+            environment.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    return env, addon, fire, messages, game, button
+end
+
+test("choosing the native font size leaves keybind geometry identical to Default", function()
+    local _, addon, _, _, _, button = readyFont()
+    local hotkey = button.HotKey
+    local font, size, flags = hotkey:GetFont()
+    local width, height = hotkey:GetSize()
+    local point, relative, relativePoint, x, y = hotkey:GetPoint()
+    local justifyV = hotkey:GetJustifyV()
+    hotkey.SetPoint = function() error("Font sizing must not move the anchor") end
+    hotkey.ClearAllPoints = function() error("Font sizing must not clear the anchor") end
+    assert(addon.SetKeybindFontSize(size))
+    equal(hotkey:GetHeight(), height)
+    equal(hotkey:GetWidth(), width)
+    equal(hotkey.fontWrites, 0)
+    equal(hotkey.heightWrites, 0)
+    equal(hotkey:GetJustifyV(), justifyV)
+    local actualPoint, actualRelative, actualRelativePoint, actualX, actualY = hotkey:GetPoint()
+    equal(actualPoint, point)
+    equal(actualRelative, relative)
+    equal(actualRelativePoint, relativePoint)
+    equal(actualX, x)
+    equal(actualY, y)
+    assert(addon.SetKeybindFontSize(14))
+    assert(addon.SetKeybindFontSize(size))
+    equal(hotkey:GetHeight(), height)
+    equal(hotkey:GetFont(), font)
+    equal(select(3, hotkey:GetFont()), flags)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(hotkey:GetHeight(), height)
+    equal(hotkey:GetJustifyV(), justifyV)
+    equal(hotkey.heightWrites, 0)
+end)
+
+test("font size defaults preserve native fonts and existing saved data", function()
+    local env, addon, _, _, _, button = readyFont()
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(env.CleanBindsDB.keybindFontSize, nil)
+    equal(env.CleanBindsDB.schemaVersion, 1)
+    equal(select(2, button.HotKey:GetFont()), 11)
+    equal(button.HotKey.fontWrites, 0)
+    equal(button.HotKey.heightWrites, 0)
+    assert(addon.SetKeybindFontSize(10))
+    equal(select(2, button.HotKey:GetFont()), 10)
+    assert(addon.SetKeybindFontSize(14))
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(button.HotKey:GetHeight(), 10)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 11)
+    equal(button.HotKey:GetHeight(), 10)
+    equal(env.CleanBindsDB.keybindFontSize, nil)
+end)
+
+test("font size accepts every whole-number step and rejects out-of-range or invalid values", function()
+    local _, addon, _, _, _, button = readyFont()
+    for size = 10, 14 do
+        assert(addon.SetKeybindFontSize(size))
+        equal(addon.GetKeybindFontSize(), size)
+        equal(select(2, button.HotKey:GetFont()), size)
+        equal(button.HotKey:GetHeight(), 10)
+        equal(button.HotKey.heightWrites, 0)
+    end
+    for _, invalid in ipairs({ 0, 9, 15, 10.5, "12", false, {}, math.huge, 0 / 0 }) do
+        local success, reason = addon.SetKeybindFontSize(invalid)
+        equal(success, false)
+        equal(reason, addon.L.INVALID_FONT_SIZE:format(10, 14))
+        equal(addon.GetKeybindFontSize(), 14)
+    end
+end)
+
+test("invalid saved font sizes fail without replacing the existing profile", function()
+    for _, invalid in ipairs({ 0, 9, 15, 10.5, "12", false, {} }) do
+        local saved = fontProfile(invalid)
+        local env, addon, fire, messages = loadAddon({ loggedIn = true, database = saved })
+        fire("ADDON_LOADED", "CleanBinds")
+        equal(addon.state, "failed")
+        equal(env.CleanBindsDB, saved)
+        equal(saved.keybindFontSize, invalid)
+        assert(messages[1]:find("whole-number font size", 1, true))
+    end
+end)
+
+test("new character profiles inherit font size once without changing older character defaults", function()
+    local env, addon, _, _, game = readyFont(14)
+    game.Switch(2)
+    equal(addon.GetKeybindFontSize(), 14)
+    assert(addon.SetKeybindFontSize(12))
+    game.Switch(1)
+    equal(addon.GetKeybindFontSize(), 14)
+    assert(addon.SetKeybindFontSize(nil))
+    game.Switch(2)
+    equal(addon.GetKeybindFontSize(), 12)
+    local _, restored = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
+        characterDatabase = snapshotDatabase(env.CleanBindsCharacterDB), bindingSet = 2,
+    })
+    equal(restored.GetKeybindFontSize(), 12)
+    local oldCharacter = macroProfile()
+    local _, old = ready({ database = fontProfile(14), characterDatabase = oldCharacter, bindingSet = 2 })
+    equal(old.GetKeybindFontSize(), nil)
+    equal(oldCharacter.keybindFontSize, nil)
+end)
+
+test("font preferences cannot be written during combat, scope loading, or through stale tokens", function()
+    local env, addon, _, _, game = readyFont(14)
+    local token = addon.GetScopeToken()
+    game.combat = true
+    equal(addon.SetKeybindFontSize(12), false)
+    equal(addon.SetKeybindFontSize(nil), false)
+    equal(addon.GetKeybindFontSize(), 14)
+    game.combat = false
+    game.Load(2)
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(addon.SetKeybindFontSize(12), false)
+    equal(env.CleanBindsDB.keybindFontSize, 14)
+    game.Save(2)
+    equal(addon.SetKeybindFontSize(12, token), false)
+    equal(env.CleanBindsCharacterDB.keybindFontSize, 14)
+    game.Save(99)
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(addon.SetKeybindFontSize(12), false)
+end)
+
+test("font sizing stays independent of custom text, macro hiding, and label resets", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local _, addon, _, _, game = readyFont(14, button)
+    game.actions[1] = "macro"
+    assert(addon.SetHideMacroNames(true))
+    assert(addon.SetLabel(addon.Bars[1], 1, "Key"))
+    equal(button.HotKey:GetText(), "Key")
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(select(2, button.Name:GetFont()), 11)
+    equal(button.Name.alpha, 0)
+    assert(addon.SetEnabled(false))
+    equal(button.HotKey:GetText(), "F")
+    equal(select(2, button.HotKey:GetFont()), 14)
+    assert(addon.ResetLabels("actionbar1"))
+    assert(addon.ResetLabels())
+    equal(addon.GetKeybindFontSize(), 14)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(button.HotKey:GetText(), "F")
+    equal(button.Name.alpha, 0)
+    equal(addon.ShouldHideMacroNames(), true)
+end)
+
+test("all supported bars and mirrors keep their own native font styles and default sizes", function()
+    local env, addon, fire, _, game = loadAddon({ loggedIn = true })
+    local buttons = {}
+    for index, bar in ipairs(addon.Bars) do
+        local button = mockButton(bar.buttonNamePrefix .. "1", "F")
+        button.HotKey.fontObject = mockFontObject(index + 8, "Font" .. index, "OUTLINE, MONOCHROME")
+        game.bindings[bar.bindingPrefix .. "1"] = { "F" }
+        env[bar.frameName] = { actionButtons = { button } }
+        buttons[index] = button
+    end
+    local mirror = mockButton("OverrideActionBarButton1", "F")
+    mirror.HotKey.fontObject = mockFontObject(13, "MirrorFont", "")
+    env.OverrideActionBar = { actionButtons = { mirror } }
+    fire("ADDON_LOADED", "CleanBinds")
+    assert(addon.SetKeybindFontSize(14))
+    for index, button in ipairs(buttons) do
+        local font, size, flags = button.HotKey:GetFont()
+        equal(font, "Font" .. index)
+        equal(size, 14)
+        equal(flags, "OUTLINE, MONOCHROME")
+        equal(button.HotKey.fontObject.size, index + 8)
+        equal(button.HotKey.color[1], 0.6)
+        equal(button.HotKey.alpha, 0.8)
+        equal(button.HotKey:GetWidth(), 32)
+        equal(button:GetSize(), 45)
+    end
+    equal(select(2, mirror.HotKey:GetFont()), 14)
+    assert(addon.SetKeybindFontSize(nil))
+    for index, button in ipairs(buttons) do
+        equal(select(2, button.HotKey:GetFont()), index + 8)
+        equal(button.HotKey:GetHeight(), 10)
+    end
+    equal(select(2, mirror.HotKey:GetFont()), 13)
+end)
+
+test("native font updates keep the override while native region size changes are left alone", function()
+    local _, addon, _, _, game, button = readyFont(14)
+    button.HotKey:SetFont("Fonts\\Changed.ttf", 13, "THICKOUTLINE")
+    button.HotKey:SetSize(37, 12)
+    game.Flush()
+    local font, size, flags = button.HotKey:GetFont()
+    equal(font, "Fonts\\Changed.ttf")
+    equal(size, 14)
+    equal(flags, "THICKOUTLINE")
+    equal(button.HotKey:GetHeight(), 12)
+    equal(button.HotKey:GetWidth(), 37)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 13)
+    equal(button.HotKey:GetHeight(), 12)
+    equal(button.HotKey:GetWidth(), 37)
+end)
+
+test("font-object changes and UI scaling preserve native styling without modifying shared fonts", function()
+    local _, addon, fire, _, game, button = readyFont(14)
+    local source = mockFontObject(14, "Fonts\\Gamepad.ttf", "MONOCHROME")
+    button.HotKey:SetFontObject(source)
+    game.Flush()
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(source.size, 14)
+    equal(button.HotKey:GetFontObject(), source)
+    source.size = 15
+    source.font = "Fonts\\Updated.ttf"
+    fire("UI_SCALE_CHANGED")
+    game.Flush()
+    equal(button.HotKey:GetFont(), "Fonts\\Updated.ttf")
+    equal(select(2, button.HotKey:GetFont()), 14)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 15)
+    source.size = 16
+    fire("UI_SCALE_CHANGED")
+    game.Flush()
+    equal(select(2, button.HotKey:GetFont()), 16)
+    equal(addon.GetKeybindFontSize(), nil)
+end)
+
+test("unbound range indicators are not resized and newly bound labels use the chosen size", function()
+    local _, addon, _, _, game, button = readyFont(14)
+    game.SetKeys("ACTIONBUTTON1", {})
+    button.HotKey:SetText("*")
+    game.Flush()
+    equal(select(2, button.HotKey:GetFont()), 11)
+    equal(button.HotKey:GetHeight(), 10)
+    game.SetKeys("ACTIONBUTTON1", { "G" })
+    button.HotKey:SetText("G")
+    game.Flush()
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(button.HotKey:GetText(), "G")
+    equal(addon.GetKeybindFontSize(), 14)
+end)
+
+test("font updates remain active in combat and repeated refreshes do not rewrite unchanged fonts", function()
+    local _, addon, fire, _, game, button = readyFont(14)
+    local writes, heights = button.HotKey.fontWrites, button.HotKey.heightWrites
+    addon.RefreshActionLabels()
+    button:Fire("OnShow")
+    equal(button.HotKey.fontWrites, writes)
+    equal(button.HotKey.heightWrites, heights)
+    game.combat = true
+    button.HotKey:SetFont("CombatFont", 12, "")
+    fire("GAME_PAD_ACTIVE_CHANGED")
+    fire("ACTIONBAR_PAGE_CHANGED")
+    game.Flush()
+    equal(button.HotKey:GetFont(), "CombatFont")
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(addon.SetKeybindFontSize(12), false)
+end)
+
+test("scope transitions restore the native font before applying the destination preference", function()
+    local env, addon, _, _, game, button = readyFont(14)
+    env.CleanBindsCharacterDB = fontProfile(12)
+    game.Load(2)
+    equal(select(2, button.HotKey:GetFont()), 11)
+    game.Save(2)
+    equal(select(2, button.HotKey:GetFont()), 12)
+    game.Switch(1)
+    equal(select(2, button.HotKey:GetFont()), 14)
+    game.Save(99)
+    equal(select(2, button.HotKey:GetFont()), 11)
+    equal(env.CleanBindsDB.keybindFontSize, 14)
+end)
+
+test("font and text hooks use independent guards for nested native updates", function()
+    local button = mockButton("ActionButton1", "F")
+    local setFont = button.HotKey.SetFont
+    button.HotKey.SetFont = function(self, ...)
+        setFont(self, ...)
+        self:SetText("Native update")
+    end
+    local _, addon, _, _, game = readyFont(nil, button)
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    assert(addon.SetKeybindFontSize(14))
+    equal(button.HotKey:GetText(), "Custom")
+    button.HotKey:SetFont("ChangedFont", 12, "MONOCHROME")
+    game.Flush()
+    equal(button.HotKey:GetText(), "Custom")
+    equal(select(2, button.HotKey:GetFont()), 14)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 12)
+    assert(addon.SetEnabled(false))
+    equal(button.HotKey:GetText(), "Native update")
+end)
+
+test("font size still applies when native keybind text cannot be inspected", function()
+    local secret = { secret = true }
+    local button = mockButton("ActionButton1", secret)
+    local _, _, _, messages = readyFont(14, button)
+    equal(button.HotKey:GetText(), secret)
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(button.HotKey.writes, 0)
+    equal(#messages, 0)
+end)
+
+test("restricted font properties are left untouched and recover when readable", function()
+    local secret = { secret = true }
+    local button = mockButton("ActionButton1", "F")
+    button.HotKey.font = { secret, 11, "OUTLINE" }
+    local _, addon, _, messages, game = readyFont(14, button)
+    equal(button.HotKey.fontWrites, 0)
+    equal(#messages, 1)
+    assert(messages[1]:find("restricted this keybinding font", 1, true))
+    button.HotKey:SetFont("ReadableFont", 12, "OUTLINE")
+    game.Flush()
+    equal(select(2, button.HotKey:GetFont()), 14)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 12)
+end)
+
+test("forbidden buttons never receive font writes", function()
+    for _, forbidButton in ipairs({ false, true }) do
+        local button = mockButton("ActionButton1", "F")
+        if forbidButton then button.forbidden = true else button.HotKey.forbidden = true end
+        local _, addon, _, messages = readyFont(14, button)
+        addon.RefreshActionLabels()
+        equal(button.HotKey.fontWrites, 0)
+        equal(#messages, 1)
+        assert(messages[1]:find("restricted this keybinding font", 1, true))
+    end
+end)
+
+test("rejected font writes release the guard without corrupting the native default", function()
+    local _, addon, _, _, game, button = readyFont()
+    button.HotKey.rejectFont = true
+    local success, reason = pcall(addon.SetKeybindFontSize, 14)
+    equal(success, false)
+    assert(reason:find("Rejected font write", 1, true))
+    button.HotKey.rejectFont = false
+    addon.RefreshActionLabels()
+    equal(select(2, button.HotKey:GetFont()), 14)
+    button.HotKey:SetFont("NewFont", 12, "")
+    game.Flush()
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 12)
+end)
+
+test("the native font slider has one-unit steps, live previews, and an independent Default reset", function()
+    local env, addon, fire, pages, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    local button = mockButton("ActionButton1", "F")
+    button.HotKey:SetWidth(24)
+    env.MainActionBar = { actionButtons = { button }, IsShown = function() return true end }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(game.fontSlider.options.minValue, 10)
+    equal(game.fontSlider.options.maxValue, 14)
+    equal(game.fontSlider.options.steps, 4)
+    equal(game.fontSlider.value, 11)
+    equal(game.fontSizeSetting.default, 0)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+    equal(game.fontSizeSetting.writes, 0)
+    equal(game.fontPreview.Reset.enabled, false)
+    game.fontSizeSetting:SetValue(14)
+    equal(select(2, button.HotKey:GetFont()), 14)
+    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 14)
+    pages[1]:Show()
+    equal(select(2, pages[1].Preview.HotKey:GetFont()), 14)
+    equal(game.fontPreview.Preview.HotKey:GetHeight(), button.HotKey:GetHeight())
+    equal(game.fontSlider.label, "14")
+    equal(game.fontPreview.Status:GetText(), addon.L.LABEL_TOO_WIDE)
+    game.fontSizeSetting:SetValue(10)
+    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 10)
+    equal(game.fontPreview.Status:GetText(), "")
+    equal(game.fontPreview.Reset.enabled, true)
+    game.fontPreview.Reset:OnClick()
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 11)
+    equal(game.fontSlider.value, 11)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+    equal(game.fontPreview.Reset.enabled, false)
+    equal(game.fontSizeSetting.writes, 2)
+end)
+
+test("font controls refresh across scopes without writing and remain read-only during combat", function()
+    local env, addon, _, _, _, game = readySettings()
+    game.fontSizeSetting:SetValue(14)
+    game.Switch(2)
+    equal(game.fontSizeSetting.displayedValue, 14)
+    game.fontSizeSetting:SetValue(12)
+    game.Switch(1)
+    equal(game.fontSizeSetting.displayedValue, 14)
+    equal(game.fontSizeSetting.writes, 2)
+    game.combat = true
+    equal(game.fontSlider.canModify(), false)
+    game.fontPreview.Reset:OnClick()
+    equal(env.CleanBindsDB.keybindFontSize, 14)
+    game.combat = false
+    game.Load(2)
+    equal(game.fontSlider.canModify(), false)
+    game.Save(2)
+    equal(game.fontSlider.canModify(), true)
+    equal(addon.GetKeybindFontSize(), 12)
+    equal(pcall(game.fontSizeSetting.SetValue, game.fontSizeSetting, false), false)
+    equal(addon.GetKeybindFontSize(), 12)
+    assert(game.fontSizeSetting:SetValueToDefault())
+    equal(addon.GetKeybindFontSize(), nil)
+end)
+
+test("Blizzard Defaults restores native sizing through the slider notification path", function()
+    local env, addon, _, _, _, game = readySettings()
+    for size = addon.MIN_KEYBIND_FONT_SIZE, addon.MAX_KEYBIND_FONT_SIZE do
+        local minimum = addon.MIN_KEYBIND_FONT_SIZE
+        game.fontSlider:SetValue(size == minimum and minimum + 1 or minimum)
+        game.fontSlider:SetValue(size)
+        equal(addon.GetKeybindFontSize(), size ~= 11 and size or nil)
+        equal(game.fontSlider.label, size == 11 and addon.L.DEFAULT_FONT_SIZE:format(11) or tostring(size))
+        assert(game.fontSizeSetting:SetValueToDefault())
+        equal(addon.GetKeybindFontSize(), nil)
+        equal(env.CleanBindsDB.keybindFontSize, nil)
+        equal(game.fontSizeSetting:GetValue(), 0)
+        equal(game.fontSlider.value, 11)
+        equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+        equal(game.fontPreview.Reset.enabled, false)
+        equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 11)
+    end
+end)
+
+test("returning the slider to its native size clears the custom preference", function()
+    local _, addon, _, _, _, game = readySettings()
+    local slider, setting = game.fontSlider, game.fontSizeSetting
+    equal(slider.value, 11)
+    equal(setting:GetValue(), 0)
+    equal(slider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+    slider:SetValue(slider.value + 1)
+    equal(addon.GetKeybindFontSize(), 12)
+    slider:SetValue(slider.value - 1)
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(slider.value, 11)
+    equal(slider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+    equal(game.fontPreview.Reset.enabled, false)
+
+    slider:SetValue(slider.options.minValue)
+    equal(addon.GetKeybindFontSize(), 10)
+    assert(setting:SetValueToDefault())
+    equal(addon.GetKeybindFontSize(), nil)
+    local writes = setting.writes
+    assert(setting:SetValueToDefault())
+    assert(setting:SetValueToDefault())
+    game.fontPreview.Reset:OnClick()
+    equal(setting.writes, writes)
+    equal(slider.value, 11)
+    equal(slider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+end)
+
+test("returning the slider to Default restores each button and preserves the other scope", function()
+    local env, addon, fire, _, _, game = readySettings({
+        bindings = { ACTIONBUTTON1 = { "F" }, ACTIONBUTTON2 = { "G" } },
+        characterDatabase = fontProfile(12),
+    })
+    local first = mockButton("ActionButton1", "F")
+    local second = mockButton("ActionButton2", "G")
+    second.HotKey.fontObject = mockFontObject(13)
+    env.MainActionBar = { actionButtons = { first, second } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    game.fontSlider:SetValue(14)
+    equal(select(2, first.HotKey:GetFont()), 14)
+    equal(select(2, second.HotKey:GetFont()), 14)
+    game.fontSlider:SetValue(11)
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(env.CleanBindsDB.keybindFontSize, nil)
+    equal(env.CleanBindsCharacterDB.keybindFontSize, 12)
+    equal(select(2, first.HotKey:GetFont()), 11)
+    equal(select(2, second.HotKey:GetFont()), 13)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+    equal(game.fontPreview.Reset.enabled, false)
+end)
+
+test("only user slider movement normalizes a size matching the current native font", function()
+    local env, addon, fire, _, _, game = readySettings({
+        database = fontProfile(14), characterDatabase = fontProfile(11),
+        bindings = { ACTIONBUTTON1 = { "F" } },
+    })
+    local button = mockButton("ActionButton1", "F")
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    game.Switch(2)
+    equal(addon.GetKeybindFontSize(), 11)
+    equal(env.CleanBindsCharacterDB.keybindFontSize, 11)
+    equal(game.fontSizeSetting.writes, 0)
+    game.Switch(1)
+    button.HotKey:SetFont("UpdatedNative", 14, "OUTLINE")
+    game.Flush()
+    equal(addon.GetKeybindFontSize(), 14)
+    equal(env.CleanBindsDB.keybindFontSize, 14)
+    equal(game.fontSizeSetting.writes, 0)
+    game.fontSlider:SetValue(13)
+    equal(addon.GetKeybindFontSize(), 13)
+    game.fontSlider:SetValue(14)
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(env.CleanBindsCharacterDB.keybindFontSize, 11)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(14))
+end)
+
+test("slider return to Default handles the client's floating-point font size", function()
+    for _, nativeSize in ipairs({ 12.000000953674316, 11.999999046325684 }) do
+        local env, addon, fire, _, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+        local button = mockButton("ActionButton1", "F")
+        button.HotKey.fontObject = mockFontObject(nativeSize)
+        env.MainActionBar = { actionButtons = { button } }
+        fire("ADDON_LOADED", "Blizzard_ActionBar")
+        game.Flush()
+        game.fontSlider:SetValue(10)
+        equal(addon.GetKeybindFontSize(), 10)
+        game.fontSlider:SetValue(12)
+        equal(addon.GetKeybindFontSize(), nil)
+        equal(env.CleanBindsDB.keybindFontSize, nil)
+        equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12))
+        equal(game.fontSlider.value, 12)
+        equal(game.fontPreview.Reset.enabled, false)
+        equal(select(2, button.HotKey:GetFont()), nativeSize)
+        game.fontSlider:SetValue(game.fontSlider.value + 1)
+        equal(addon.GetKeybindFontSize(), 13)
+        game.fontSlider:SetValue(game.fontSlider.value - 1)
+        equal(addon.GetKeybindFontSize(), nil)
+        game.fontSlider:SetValue(13.000000953674316)
+        equal(addon.GetKeybindFontSize(), 13)
+        equal(game.fontSlider.value, 13)
+    end
+end)
+
+test("font-size precision tolerance does not hide a genuinely fractional native size", function()
+    local env, addon, fire, _, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    local button = mockButton("ActionButton1", "F")
+    button.HotKey.fontObject = mockFontObject(12.25)
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    game.fontSlider:SetValue(12)
+    equal(addon.GetKeybindFontSize(), 12)
+    equal(game.fontSlider.label, "12")
+    game.fontPreview.Reset:OnClick()
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(game.fontSlider.value, 12.25)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12.25))
+    equal(select(2, button.HotKey:GetFont()), 12.25)
+end)
+
+test("native font precision does not cause repeated writes or lose font-object tracking", function()
+    local button = mockButton("ActionButton1", "F")
+    local getFont = button.HotKey.GetFont
+    local noise = 0.000000953674316
+    button.HotKey.GetFont = function(self)
+        local font, size, flags = getFont(self)
+        return font, size + noise, flags
+    end
+    local _, addon, fire, _, game = readyFont(14, button)
+    local writes = button.HotKey.fontWrites
+    addon.RefreshActionLabels()
+    addon.RefreshActionLabels()
+    button:Fire("OnShow")
+    equal(button.HotKey.fontWrites, writes)
+    button.HotKey.fontObject.size = 12
+    fire("UI_SCALE_CHANGED")
+    game.Flush()
+    equal(button.HotKey.fontWrites, writes)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 12 + noise)
+    local restoredWrites = button.HotKey.fontWrites
+    addon.RefreshActionLabels()
+    equal(button.HotKey.fontWrites, restoredWrites)
+end)
+
+test("native Defaults restores each font and leaves the other binding scope intact", function()
+    local env, addon, fire, _, _, game = readySettings({
+        bindings = { ACTIONBUTTON1 = { "F" }, ACTIONBUTTON2 = { "G" } },
+    })
+    local first = mockButton("ActionButton1", "F")
+    local second = mockButton("ActionButton2", "G")
+    second.HotKey.fontObject = mockFontObject(13)
+    env.MainActionBar = { actionButtons = { first, second } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    game.fontSlider:SetValue(14)
+    game.Switch(2)
+    game.fontSlider:SetValue(12)
+    assert(game.fontSizeSetting:SetValueToDefault())
+    equal(env.CleanBindsDB.keybindFontSize, 14)
+    equal(env.CleanBindsCharacterDB.keybindFontSize, nil)
+    equal(select(2, first.HotKey:GetFont()), 11)
+    equal(select(2, second.HotKey:GetFont()), 13)
+    game.Switch(1)
+    equal(game.fontSlider.value, 14)
+    equal(select(2, first.HotKey:GetFont()), 14)
+    game.fontPreview.Reset:OnClick()
+    equal(game.fontSlider.value, 11)
+    equal(env.CleanBindsDB.keybindFontSize, nil)
+    equal(select(2, first.HotKey:GetFont()), 11)
+    equal(select(2, second.HotKey:GetFont()), 13)
+end)
+
+test("the Default thumb follows the preview button's native font without saving a numeric override", function()
+    local env, addon, fire, _, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    local button = mockButton("ActionButton1", "F")
+    button.HotKey.fontObject = mockFontObject(13)
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(game.fontSlider.value, 13)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(13))
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(game.fontSizeSetting.writes, 0)
+
+    button.HotKey:SetFont("UpdatedNative", 12, "OUTLINE")
+    game.Flush()
+    equal(game.fontSlider.value, 12)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12))
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(game.fontSizeSetting.writes, 0)
+    game.fontSlider:SetValue(14)
+    assert(game.fontSizeSetting:SetValueToDefault())
+    equal(game.fontSlider.value, 12)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12))
+    equal(select(2, button.HotKey:GetFont()), 12)
+    equal(addon.GetKeybindFontSize(), nil)
+end)
+
+test("initializing a reused numeric slider cannot turn Default into a saved size", function()
+    local _, addon, _, _, _, game = readySettings()
+    local control, setting, slider = game.fontSliderControl, game.fontSizeSetting, game.fontSlider
+    slider:SetValue(14)
+    game.fontPreview.Reset:OnClick()
+    local writes = setting.writes
+    control:Init(control.initializer)
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(setting.writes, writes)
+    equal(slider.value, 11)
+    equal(slider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
+    slider:SetValue(14)
+    game.combat = true
+    assert(setting:SetValueToDefault())
+    equal(addon.GetKeybindFontSize(), 14)
+    equal(slider.value, 14)
+    equal(slider.label, "14")
+end)
+
+test("unavailable default fonts disable the numeric slider until a native size can be read", function()
+    local env, addon, fire, _, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    local button = mockButton("ActionButton1", "F")
+    button.HotKey.font = { { secret = true }, 11, "OUTLINE" }
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(game.fontSlider.enabled, false)
+    equal(game.fontSlider.label, addon.L.UNAVAILABLE)
+    equal(game.fontPreview.Status:GetText(), addon.L.FONT_REFERENCE_UNAVAILABLE)
+    equal(game.fontSizeSetting.writes, 0)
+    button.HotKey:SetFont("ReadableFont", 13, "OUTLINE")
+    game.Flush()
+    equal(game.fontSlider.enabled, true)
+    equal(game.fontSlider.value, 13)
+    equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(13))
+    equal(game.fontSizeSetting.writes, 0)
+    equal(addon.GetKeybindFontSize(), nil)
+end)
+
+test("font previews show the selected size before native action buttons exist", function()
+    local _, addon, _, _, _, game = readySettings()
+    game.fontSizeSetting:SetValue(14)
+    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 14)
+    equal(game.fontPreview.Preview.HotKey:GetHeight(), 10)
+    game.fontPreview.Reset:OnClick()
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 11)
+end)
+
+test("font previews report restricted fonts and resume when the native font becomes readable", function()
+    local env, addon, fire, pages, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    local button = mockButton("ActionButton1", "F")
+    button.HotKey.font = { { secret = true }, 11, "OUTLINE" }
+    env.MainActionBar = { actionButtons = { button }, IsShown = function() return true end }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    game.fontSizeSetting:SetValue(14)
+    equal(game.fontPreview.Preview:IsShown(), false)
+    equal(game.fontPreview.Status:GetText(), addon.L.FONT_REFERENCE_UNAVAILABLE)
+    pages[1]:Show()
+    equal(pages[1].Preview:IsShown(), false)
+    equal(pages[1].Status:GetText(), addon.L.FONT_REFERENCE_UNAVAILABLE)
+    button.HotKey:SetFont("ReadableFont", 12, "OUTLINE")
+    game.Flush()
+    equal(game.fontPreview.Preview:IsShown(), true)
+    equal(pages[1].Preview:IsShown(), true)
+    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 14)
+end)
+
+test("font styling waits for startup scope and attaches late buttons without changing their defaults", function()
+    local env, addon, fire, _, game = loadAddon({
+        loggedIn = true, bindingSet = 0, database = fontProfile(14),
+        bindings = { ACTIONBUTTON1 = { "F" } },
+    })
+    fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.GetKeybindFontSize(), nil)
+    equal(addon.SetKeybindFontSize(nil), false)
+    equal(env.CleanBindsDB.keybindFontSize, 14)
+    game.bindingSet = 1
+    game.Flush()
+    local button = mockButton("ActionButton1", "F")
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(select(2, button.HotKey:GetFont()), 14)
+    local writes = button.HotKey.fontWrites
+    addon.RefreshActionLabels()
+    button:Fire("OnShow")
+    equal(button.HotKey.fontWrites, writes)
+    equal(#button.scripts.OnShow, 1)
+    assert(addon.SetKeybindFontSize(nil))
+    equal(select(2, button.HotKey:GetFont()), 11)
 end)
 
 print(("%d tests passed"):format(passed))

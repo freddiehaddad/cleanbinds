@@ -19,7 +19,7 @@ local function CheckCapabilities()
 
     for _, name in ipairs({
         "GetBinding", "GetBindingKey", "GetBindingName", "GetBindingText", "GetCurrentBindingSet",
-        "IsBindingForGamePad", "GetActionInfo",
+        "IsBindingForGamePad", "GetActionInfo", "ApproximatelyEqual",
         "SaveBindings", "LoadBindings", "SetBinding", "hooksecurefunc", "InCombatLockdown",
     }) do
         if type(_G[name]) ~= "function" then
@@ -47,6 +47,8 @@ local function CheckCapabilities()
         "RegisterCanvasLayoutSubcategory",
         "RegisterProxySetting",
         "CreateCheckbox",
+        "CreateControlInitializer",
+        "CreateSliderOptions",
         "OpenToCategory",
     }) do
         if type(Settings) ~= "table" or type(Settings[name]) ~= "function" then
@@ -55,11 +57,12 @@ local function CheckCapabilities()
     end
 end
 
-local function NewProfile(enabled, hideMacroNames)
+local function NewProfile(enabled, hideMacroNames, keybindFontSize)
     return {
         schemaVersion = schemaVersion,
         enabled = enabled,
         hideMacroNames = hideMacroNames == true,
+        keybindFontSize = keybindFontSize,
         overrides = {},
         bindingSnapshots = {},
     }
@@ -77,6 +80,10 @@ local function ValidateProfile(db)
     end
     if db.hideMacroNames ~= nil and type(db.hideMacroNames) ~= "boolean" then
         return nil, L.INVALID_DATABASE:format("hideMacroNames must be a boolean")
+    end
+    if db.keybindFontSize ~= nil and not addon.IsValidKeybindFontSize(db.keybindFontSize) then
+        return nil, L.INVALID_DATABASE:format(
+            L.INVALID_FONT_SIZE:format(addon.MIN_KEYBIND_FONT_SIZE, addon.MAX_KEYBIND_FONT_SIZE))
     end
     if type(db.overrides) ~= "table" then
         return nil, L.INVALID_DATABASE:format("overrides must be a table")
@@ -100,7 +107,7 @@ function addon.GetProfile(scope)
             if not account then
                 return nil, reason
             end
-            CleanBindsCharacterDB = NewProfile(account.enabled, account.hideMacroNames)
+            CleanBindsCharacterDB = NewProfile(account.enabled, account.hideMacroNames, account.keybindFontSize)
         end
         return ValidateProfile(CleanBindsCharacterDB)
     end

@@ -9,6 +9,9 @@ local scopeToken = 0
 local loadPending = false
 local loadSerial = 0
 
+addon.MIN_KEYBIND_FONT_SIZE = 10
+addon.MAX_KEYBIND_FONT_SIZE = 14
+
 local function LabelKey(bar, index)
     return bar.id .. ":" .. index
 end
@@ -72,11 +75,11 @@ function addon.LiteralLabel(text)
 end
 
 local function Notify()
-    if addon.RefreshSettings then
-        addon.RefreshSettings()
-    end
     if addon.RefreshActionLabels then
         addon.RefreshActionLabels()
+    end
+    if addon.RefreshSettings then
+        addon.RefreshSettings()
     end
 end
 
@@ -129,6 +132,17 @@ end
 
 function addon.ShouldHideMacroNames()
     return IsScopeReady() and addon.db ~= nil and addon.db.hideMacroNames == true
+end
+
+function addon.IsValidKeybindFontSize(size)
+    return type(size) == "number" and size >= addon.MIN_KEYBIND_FONT_SIZE
+        and size <= addon.MAX_KEYBIND_FONT_SIZE and size % 1 == 0
+end
+
+function addon.GetKeybindFontSize()
+    if IsScopeReady() and addon.db then
+        return addon.db.keybindFontSize
+    end
 end
 
 local function InvalidateInteractions()
@@ -326,6 +340,19 @@ function addon.SetHideMacroNames(hidden, expectedToken)
         return false, L.INVALID_DATABASE:format("hideMacroNames must be a boolean")
     end
     addon.db.hideMacroNames = hidden
+    Notify()
+    return true
+end
+
+function addon.SetKeybindFontSize(size, expectedToken)
+    local allowed, reason = addon.CanEdit(expectedToken)
+    if not allowed then
+        return false, reason
+    end
+    if size ~= nil and not addon.IsValidKeybindFontSize(size) then
+        return false, L.INVALID_FONT_SIZE:format(addon.MIN_KEYBIND_FONT_SIZE, addon.MAX_KEYBIND_FONT_SIZE)
+    end
+    addon.db.keybindFontSize = size
     Notify()
     return true
 end
