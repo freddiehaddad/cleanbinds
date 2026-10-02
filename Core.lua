@@ -19,7 +19,7 @@ local function CheckCapabilities()
 
     for _, name in ipairs({
         "GetBinding", "GetBindingKey", "GetBindingName", "GetBindingText", "GetCurrentBindingSet",
-        "IsBindingForGamePad",
+        "IsBindingForGamePad", "GetActionInfo",
         "SaveBindings", "LoadBindings", "SetBinding", "hooksecurefunc", "InCombatLockdown",
     }) do
         if type(_G[name]) ~= "function" then
@@ -55,10 +55,11 @@ local function CheckCapabilities()
     end
 end
 
-local function NewProfile(enabled)
+local function NewProfile(enabled, hideMacroNames)
     return {
         schemaVersion = schemaVersion,
         enabled = enabled,
+        hideMacroNames = hideMacroNames == true,
         overrides = {},
         bindingSnapshots = {},
     }
@@ -73,6 +74,9 @@ local function ValidateProfile(db)
     end
     if type(db.enabled) ~= "boolean" then
         return nil, L.INVALID_DATABASE:format("enabled must be a boolean")
+    end
+    if db.hideMacroNames ~= nil and type(db.hideMacroNames) ~= "boolean" then
+        return nil, L.INVALID_DATABASE:format("hideMacroNames must be a boolean")
     end
     if type(db.overrides) ~= "table" then
         return nil, L.INVALID_DATABASE:format("overrides must be a table")
@@ -96,7 +100,7 @@ function addon.GetProfile(scope)
             if not account then
                 return nil, reason
             end
-            CleanBindsCharacterDB = NewProfile(account.enabled)
+            CleanBindsCharacterDB = NewProfile(account.enabled, account.hideMacroNames)
         end
         return ValidateProfile(CleanBindsCharacterDB)
     end

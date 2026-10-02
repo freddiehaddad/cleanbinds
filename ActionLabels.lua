@@ -1,5 +1,6 @@
 local _, addon = ...
 local records = {}
+local macroRecords = {}
 local warned = {}
 local initialized = false
 local refreshQueued = false
@@ -12,16 +13,22 @@ local function IsForbidden(object)
     return type(object.IsForbidden) == "function" and object:IsForbidden()
 end
 
-local function Warn(record)
-    if not warned[record.button] then
-        warned[record.button] = true
-        addon.Print(addon.L.LABEL_ACCESS_BLOCKED:format(addon.GetBarName(record.bar), record.index))
+local function Warn(record, message)
+    message = message or addon.L.LABEL_ACCESS_BLOCKED
+    local warnings = warned[record.button]
+    if not warnings then
+        warnings = {}
+        warned[record.button] = warnings
+    end
+    if not warnings[message] then
+        warnings[message] = true
+        addon.Print(message:format(addon.GetBarName(record.bar), record.index))
     end
 end
 
-local function WriteText(record, text)
+local function WriteRegion(record, region, method, value)
     record.writing = true
-    local success, reason = pcall(record.hotkey.SetText, record.hotkey, text)
+    local success, reason = pcall(region[method], region, value)
     record.writing = false
     if not success then
         error(reason, 0)
@@ -50,18 +57,100 @@ local function Apply(record)
             text = text .. "|r"
         end
         if record.appliedText ~= text then
-            WriteText(record, text)
+            WriteRegion(record, record.hotkey, "SetText", text)
             record.appliedText = text
         end
     elseif record.appliedText then
-        WriteText(record, record.nativeText)
+        WriteRegion(record, record.hotkey, "SetText", record.nativeText)
         record.appliedText = nil
     end
+end
+
+local function ApplyMacroName(record)
+    local hidden = addon.ShouldHideMacroNames()
+    if IsForbidden(record.button) or IsForbidden(record.name) or not IsReadable(record.nativeAlpha) then
+        if hidden or record.hidden then
+            Warn(record, addon.L.MACRO_NAME_ACCESS_BLOCKED)
+        end
+        return
+    end
+
+    local isMacro = false
+    if hidden then
+        local action = record.button.action
+        if not IsReadable(action) then
+            Warn(record, addon.L.MACRO_NAME_ACCESS_BLOCKED)
+        elseif type(action) == "number" and action > 0 then
+            local actionType = GetActionInfo(action)
+            if IsReadable(actionType) then
+                isMacro = actionType == "macro"
+            else
+                Warn(record, addon.L.MACRO_NAME_ACCESS_BLOCKED)
+            end
+        end
+    end
+
+    if isMacro then
+        if not record.hidden then
+            WriteRegion(record, record.name, "SetAlpha", 0)
+            record.hidden = true
+        end
+    elseif record.hidden then
+        WriteRegion(record, record.name, "SetAlpha", record.nativeAlpha)
+        record.hidden = false
+    end
+end
+
+local function TrackMacroName(button, bar, index)
+    local record = macroRecords[button]
+    if record then
+        ApplyMacroName(record)
+        return
+    end
+
+    local name = button.Name
+    if not name then
+        return
+    end
+    if IsForbidden(button) or IsForbidden(name) then
+        if addon.ShouldHideMacroNames() then
+            Warn({ button = button, bar = bar, index = index }, addon.L.MACRO_NAME_ACCESS_BLOCKED)
+        end
+        return
+    end
+
+    record = {
+        button = button,
+        name = name,
+        bar = bar,
+        index = index,
+        nativeAlpha = name:GetAlpha(),
+    }
+    macroRecords[button] = record
+    hooksecurefunc(name, "SetAlpha", function(_, alpha)
+        if record.writing then
+            return
+        end
+        record.nativeAlpha = alpha
+        record.hidden = false
+        ApplyMacroName(record)
+    end)
+    hooksecurefunc(name, "SetText", function()
+        ApplyMacroName(record)
+    end)
+    button:HookScript("OnShow", function()
+        ApplyMacroName(record)
+    end)
+    ApplyMacroName(record)
 end
 
 local function Track(button, bar, index)
     if not button then
         return
+    end
+
+    if bar.id:match("^actionbar") then
+        TrackMacroName(button, bar, index)
     end
 
     local record = records[button]
@@ -148,6 +237,7 @@ function addon.InitializeActionLabels()
         "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "UPDATE_BINDINGS",
         "GAME_PAD_ACTIVE_CHANGED", "UPDATE_SHAPESHIFT_FORM", "PET_BAR_UPDATE",
         "UPDATE_VEHICLE_ACTIONBAR", "PLAYER_REGEN_ENABLED",
+        "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR", "UPDATE_MACROS",
     }) do
         events:RegisterEvent(event)
     end

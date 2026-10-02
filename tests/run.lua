@@ -42,6 +42,7 @@ local function loadAddon(options)
         bindings = options.bindings or {},
         bindingSet = options.bindingSet or 1,
         savedBindings = options.savedBindings or {},
+        actions = options.actions or {},
         combat = false,
     }
     game.savedBindings[game.bindingSet] = copyTable(game.bindings)
@@ -100,6 +101,10 @@ local function loadAddon(options)
     environment.GetCurrentBindingSet = function()
         return game.bindingSet
     end
+    environment.GetActionInfo = function(action)
+        assert(type(action) == "number" and action > 0)
+        return game.actions[action]
+    end
     environment.InCombatLockdown = function()
         return game.combat
     end
@@ -120,7 +125,7 @@ local function loadAddon(options)
 
     for _, name in ipairs({
         "SetBinding", "SetBindingClick", "SetBindingSpell", "SetBindingItem", "SetBindingMacro",
-        "SaveBindings", "LoadBindings",
+        "SaveBindings", "LoadBindings", "EditMacro", "DeleteMacro",
     }) do
         environment[name] = function()
             error("The addon must not call " .. name)
@@ -698,8 +703,8 @@ local function readySettings(options)
                 return {}
             end
             environment.Settings.RegisterAddOnCategory = noop
-            environment.Settings.RegisterProxySetting = function(_, _, _, _, _, getter, setter)
-                local setting = { updates = 0, writes = 0 }
+            environment.Settings.RegisterProxySetting = function(_, variable, _, _, _, getter, setter)
+                local setting = { variable = variable, updates = 0, writes = 0 }
                 function setting:GetValue()
                     return getter()
                 end
@@ -711,10 +716,24 @@ local function readySettings(options)
                     self.updates = self.updates + 1
                     self.displayedValue = getter()
                 end
-                game.enabledSetting = setting
+                if variable == "CLEANBINDS_ENABLED" then
+                    game.enabledSetting = setting
+                elseif variable == "CLEANBINDS_HIDE_MACRO_NAMES" then
+                    game.hideMacroNamesSetting = setting
+                else
+                    error("Unexpected proxy setting: " .. variable)
+                end
                 return setting
             end
-            environment.Settings.CreateCheckbox = function() return initializer end
+            game.checkboxes = {}
+            environment.Settings.CreateCheckbox = function(_, setting)
+                local checkbox = copyTable(initializer)
+                function checkbox:AddModifyPredicate(predicate)
+                    self.canModify = predicate
+                end
+                game.checkboxes[setting.variable] = checkbox
+                return checkbox
+            end
             environment.Settings.CreateElementInitializer = function(_, data)
                 game.description = data.text
                 return initializer
@@ -1904,6 +1923,485 @@ test("deferred startup reconciles changed bindings only after the scope is known
     equal(character.bindingSnapshots["actionbar1:1"].keyboard, "G")
     equal(#messages, 2)
     assert(messages[2]:find("displayed binding changed", 1, true))
+end)
+
+local function macroProfile(hidden)
+    return {
+        schemaVersion = 1,
+        enabled = true,
+        hideMacroNames = hidden,
+        overrides = {},
+        bindingSnapshots = {},
+    }
+end
+
+local function mockMacroButton(name, action, text)
+    local button = mockButton(name, "F")
+    button.action = action
+    button.Name = mockButton(name .. "Name", text).HotKey
+    button.Name.alphaWrites = 0
+    function button.Name:GetAlpha()
+        return self.alpha
+    end
+    function button.Name:SetAlpha(value)
+        if self.rejectAlpha then
+            error("Rejected alpha write")
+        end
+        self.alpha = value
+        self.alphaWrites = self.alphaWrites + 1
+    end
+    return button
+end
+
+test("macro names are visible for fresh and existing profiles without migrating their data", function()
+    local _, fresh = ready()
+    equal(fresh.db.hideMacroNames, false)
+    equal(fresh.ShouldHideMacroNames(), false)
+    for _, scope in ipairs({ 1, 2 }) do
+        local saved = macroProfile()
+        saved.overrides["actionbar1:1"] = "Keep"
+        saved.bindingSnapshots["actionbar1:1"] = bindingSnapshot("ACTIONBUTTON1", "F")
+        local account = scope == 1 and saved or macroProfile(true)
+        local _, addon = ready({
+            bindingSet = scope, database = account, characterDatabase = scope == 2 and saved or nil,
+            bindings = { ACTIONBUTTON1 = { "F" } },
+        })
+        equal(addon.db, saved)
+        equal(addon.ShouldHideMacroNames(), false)
+        equal(saved.hideMacroNames, nil)
+        equal(saved.schemaVersion, 1)
+        equal(saved.overrides["actionbar1:1"], "Keep")
+        equal(saved.bindingSnapshots["actionbar1:1"].keyboard, "F")
+    end
+end)
+
+test("invalid macro visibility settings are rejected without replacing profiles", function()
+    for _, value in ipairs({ "false", 0, {} }) do
+        for _, scope in ipairs({ 1, 2 }) do
+            local saved = macroProfile(value)
+            local env, addon, fire, messages = loadAddon({
+                loggedIn = true, bindingSet = scope,
+                database = scope == 1 and saved or nil,
+                characterDatabase = scope == 2 and saved or nil,
+            })
+            fire("ADDON_LOADED", "CleanBinds")
+            equal(addon.state, "failed")
+            equal(scope == 1 and env.CleanBindsDB or env.CleanBindsCharacterDB, saved)
+            equal(saved.hideMacroNames, value)
+            assert(messages[1]:find("hideMacroNames must be a boolean", 1, true))
+        end
+    end
+end)
+
+test("new character setups inherit macro visibility once and keep independent choices", function()
+    local env, addon, _, _, game = ready()
+    assert(addon.SetHideMacroNames(true))
+    game.Switch(2)
+    equal(env.CleanBindsCharacterDB.hideMacroNames, true)
+    assert(addon.SetHideMacroNames(false))
+    game.Switch(1)
+    equal(addon.ShouldHideMacroNames(), true)
+    game.Switch(2)
+    equal(addon.ShouldHideMacroNames(), false)
+    game.Switch(1)
+    local _, another, _, _, anotherGame = ready({ database = snapshotDatabase(env.CleanBindsDB) })
+    equal(another.ShouldHideMacroNames(), true)
+    anotherGame.Switch(2)
+    equal(another.ShouldHideMacroNames(), true)
+    local _, restored = ready({
+        database = snapshotDatabase(env.CleanBindsDB),
+        characterDatabase = snapshotDatabase(env.CleanBindsCharacterDB), bindingSet = 2,
+    })
+    equal(restored.ShouldHideMacroNames(), false)
+end)
+
+test("macro visibility setters respect combat, pending scopes, stale tokens, and invalid input", function()
+    local env, addon, _, _, game = ready()
+    assert(addon.SetHideMacroNames(true))
+    local token = addon.GetScopeToken()
+    for _, invalid in ipairs({ "true", 1, {} }) do
+        local success, reason = addon.SetHideMacroNames(invalid)
+        equal(success, false)
+        assert(reason:find("hideMacroNames must be a boolean", 1, true))
+        equal(env.CleanBindsDB.hideMacroNames, true)
+    end
+    game.combat = true
+    local success, reason = addon.SetHideMacroNames(false)
+    equal(success, false)
+    equal(reason, addon.L.COMBAT_READ_ONLY)
+    game.combat = false
+    game.Load(2)
+    equal(addon.SetHideMacroNames(false), false)
+    equal(addon.ShouldHideMacroNames(), false)
+    equal(env.CleanBindsDB.hideMacroNames, true)
+    equal(env.CleanBindsCharacterDB, nil)
+    game.Save(2)
+    equal(addon.SetHideMacroNames(false, token), false)
+    equal(env.CleanBindsCharacterDB.hideMacroNames, true)
+    game.Save(99)
+    equal(addon.ShouldHideMacroNames(), false)
+    equal(addon.SetHideMacroNames(false), false)
+    equal(env.CleanBindsDB.hideMacroNames, true)
+    equal(env.CleanBindsCharacterDB.hideMacroNames, true)
+end)
+
+test("label resets and custom-label enable changes leave macro visibility alone", function()
+    local _, addon = ready()
+    assert(addon.SetHideMacroNames(true))
+    assert(addon.SetLabel(addon.Bars[1], 1, "Custom"))
+    assert(addon.SetEnabled(false))
+    equal(addon.ShouldHideMacroNames(), true)
+    assert(addon.ResetLabels("actionbar1"))
+    equal(addon.ShouldHideMacroNames(), true)
+    assert(addon.ResetLabels())
+    equal(addon.ShouldHideMacroNames(), true)
+    assert(addon.SetHideMacroNames(false))
+    equal(addon.IsEnabled(), false)
+end)
+
+test("the macro-name checkbox follows the active scope without writing during refresh", function()
+    local env, addon, _, _, _, game = readySettings()
+    local setting = game.hideMacroNamesSetting
+    local checkbox = game.checkboxes.CLEANBINDS_HIDE_MACRO_NAMES
+    equal(setting:GetValue(), false)
+    equal(checkbox.canModify(), true)
+    setting:SetValue(true)
+    equal(env.CleanBindsDB.hideMacroNames, true)
+    game.Switch(2)
+    equal(setting.displayedValue, true)
+    setting:SetValue(false)
+    game.Switch(1)
+    equal(setting.displayedValue, true)
+    game.Switch(2)
+    equal(setting.displayedValue, false)
+    equal(setting.writes, 2)
+    equal(game.enabledSetting.writes, 0)
+    game.combat = true
+    equal(checkbox.canModify(), false)
+    game.combat = false
+    game.Load(1)
+    equal(checkbox.canModify(), false)
+    game.Save(1)
+    equal(checkbox.canModify(), true)
+    equal(setting.displayedValue, true)
+    equal(setting.writes, 2)
+end)
+
+test("hiding macro names changes only their visibility, not text or keybinding labels", function()
+    local button = mockMacroButton("ActionButton1", 1, "Long macro name")
+    button.Count = { text = "3" }
+    button.cooldown = { text = "5" }
+    local _, addon = ready({
+        bindings = { ACTIONBUTTON1 = { "F" } }, actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    equal(button.Name.alpha, 0.8)
+    equal(button.Name.alphaWrites, 0)
+    assert(addon.SetLabel(addon.Bars[1], 1, "Key"))
+    assert(addon.SetHideMacroNames(true))
+    equal(button.Name.alpha, 0)
+    equal(button.Name:GetText(), "Long macro name")
+    equal(button.Name.writes, 0)
+    equal(button.HotKey:GetText(), "Key")
+    equal(button.Count.text, "3")
+    equal(button.cooldown.text, "5")
+    assert(addon.SetEnabled(false))
+    equal(button.Name.alpha, 0)
+    equal(button.HotKey:GetText(), "F")
+    assert(addon.SetHideMacroNames(false))
+    equal(button.Name.alpha, 0.8)
+    equal(button.Name:GetText(), "Long macro name")
+end)
+
+test("macro visibility covers all normal bars but leaves non-macros and special bars alone", function()
+    local env, addon, fire, _, game = loadAddon({ loggedIn = true })
+    local buttons = {}
+    for number, bar in ipairs(addon.Bars) do
+        local macro = mockMacroButton(bar.buttonNamePrefix .. "1", number * 2, "Macro")
+        local spell = mockMacroButton(bar.buttonNamePrefix .. "2", number * 2 + 1, "Other text")
+        game.actions[number * 2] = "macro"
+        game.actions[number * 2 + 1] = "spell"
+        env[bar.frameName] = { actionButtons = { macro, spell } }
+        buttons[number] = { macro, spell }
+    end
+    local override = mockMacroButton("OverrideActionBarButton1", 100, "Vehicle")
+    game.actions[100] = "spell"
+    env.OverrideActionBar = { actionButtons = { override } }
+    fire("ADDON_LOADED", "CleanBinds")
+    assert(addon.SetHideMacroNames(true))
+    for number, pair in ipairs(buttons) do
+        equal(pair[1].Name.alpha, number <= 8 and 0 or 0.8)
+        equal(pair[2].Name.alpha, 0.8)
+        equal(pair[1].Name.writes, 0)
+    end
+    equal(override.Name.alpha, 0.8)
+    game.actions[100] = "macro"
+    override.Name:SetText("Macro on override bar")
+    equal(override.Name.alpha, 0)
+end)
+
+test("macro hiding survives native renames and alpha updates and restores the latest values", function()
+    local button = mockMacroButton("ActionButton1", 1, "Original")
+    local _, addon, fire, _, game = ready({
+        actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetHideMacroNames(true))
+    button.Name:SetText("Renamed")
+    button.Name:SetAlpha(0.4)
+    fire("UPDATE_MACROS")
+    game.Flush()
+    equal(button.Name.alpha, 0)
+    equal(button.Name:GetText(), "Renamed")
+    equal(button.Name.writes, 1)
+    local writes = button.Name.alphaWrites
+    addon.RefreshActionLabels()
+    addon.RefreshActionLabels()
+    equal(button.Name.alphaWrites, writes)
+    assert(addon.SetHideMacroNames(false))
+    equal(button.Name.alpha, 0.4)
+    equal(button.Name:GetText(), "Renamed")
+end)
+
+test("action swaps and bar paging hide only the macro currently on the button", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local _, addon, fire, _, game = ready({
+        actions = { [1] = "macro", [2] = "item", [3] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetHideMacroNames(true))
+    for _, event in ipairs({ "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR" }) do
+        button.action = 2
+        fire(event)
+        game.Flush()
+        equal(button.Name.alpha, 0.8)
+        button.action = 3
+        fire(event)
+        game.Flush()
+        equal(button.Name.alpha, 0)
+    end
+    button.action = nil
+    button.Name:SetText("")
+    equal(button.Name.alpha, 0.8)
+    equal(button.Name:GetText(), "")
+end)
+
+test("macro visibility restores during scope changes and resumes with the selected preference", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local env, addon, _, _, game = ready({
+        database = macroProfile(true), characterDatabase = macroProfile(false),
+        actions = { [1] = "macro" },
+        setup = function(environment)
+            environment.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    equal(button.Name.alpha, 0)
+    game.Load(2)
+    equal(button.Name.alpha, 0.8)
+    equal(env.CleanBindsDB.hideMacroNames, true)
+    game.Save(2)
+    equal(button.Name.alpha, 0.8)
+    game.Switch(1)
+    equal(button.Name.alpha, 0)
+    game.Save(99)
+    equal(button.Name.alpha, 0.8)
+    game.Switch(1)
+    game.Flush()
+    equal(button.Name.alpha, 0)
+end)
+
+test("combat updates keep hiding macro names while configuration remains locked", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local _, addon, fire, _, game = ready({
+        database = macroProfile(true), actions = { [1] = "macro", [2] = "spell" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    game.combat = true
+    button.Name:SetText("Updated")
+    equal(button.Name.alpha, 0)
+    equal(addon.SetHideMacroNames(false), false)
+    button.action = 2
+    button.Name:SetText("Spell text")
+    equal(button.Name.alpha, 0.8)
+    button.action = 1
+    button.Name:SetText("Macro")
+    equal(button.Name.alpha, 0)
+    game.combat = false
+    fire("PLAYER_REGEN_ENABLED")
+    game.Flush()
+    equal(button.Name.alpha, 0)
+end)
+
+test("late buttons without hotkey regions still get macro visibility with no duplicate hooks", function()
+    local env, addon, fire, _, game = ready({ database = macroProfile(true), actions = { [1] = "macro" } })
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    button.HotKey = nil
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    equal(button.Name.alpha, 0)
+    local hooks = #button.scripts.OnShow
+    local writes = button.Name.alphaWrites
+    addon.RefreshActionLabels()
+    button:Fire("OnShow")
+    equal(#button.scripts.OnShow, hooks)
+    equal(button.Name.alphaWrites, writes)
+end)
+
+test("macro hiding never reads or replaces the macro name text", function()
+    local secret = { secret = true }
+    local button = mockMacroButton("ActionButton1", 1, secret)
+    button.Name.GetText = function()
+        error("Macro text must not be read")
+    end
+    local _, addon, _, messages = ready({
+        actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    assert(addon.SetHideMacroNames(true))
+    equal(button.Name.alpha, 0)
+    assert(addon.SetHideMacroNames(false))
+    equal(button.Name.alpha, 0.8)
+    equal(button.Name.text, secret)
+    equal(button.Name.writes, 0)
+    equal(#messages, 0)
+end)
+
+test("showing macro names preserves native hidden and transparent states", function()
+    for _, alpha in ipairs({ 0, 0.5 }) do
+        local button = mockMacroButton("ActionButton1", 1, "Macro")
+        button.Name.shown = false
+        button.Name.alpha = alpha
+        local _, addon = ready({
+            actions = { [1] = "macro" },
+            setup = function(env)
+                env.MainActionBar = { actionButtons = { button } }
+            end,
+        })
+        assert(addon.SetHideMacroNames(true))
+        equal(button.Name.alpha, 0)
+        assert(addon.SetHideMacroNames(false))
+        equal(button.Name.alpha, alpha)
+        equal(button.Name.shown, false)
+        equal(button.Name:GetText(), "Macro")
+    end
+end)
+
+test("unreadable macro-name opacity is preserved until the client supplies a readable value", function()
+    local secret = { secret = true }
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    button.Name.alpha = secret
+    local _, addon, _, messages = ready({
+        database = macroProfile(true), actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    equal(button.Name.alpha, secret)
+    equal(button.Name.alphaWrites, 0)
+    equal(#messages, 1)
+    button.Name:SetAlpha(0.6)
+    equal(button.Name.alpha, 0)
+    assert(addon.SetHideMacroNames(false))
+    equal(button.Name.alpha, 0.6)
+end)
+
+test("saved macro visibility waits for binding startup before applying to buttons", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local saved = macroProfile(true)
+    local _, addon, fire, _, game = loadAddon({
+        loggedIn = true, bindingSet = 0, database = saved, actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.state, "waiting_bindings")
+    equal(addon.ShouldHideMacroNames(), false)
+    equal(addon.SetHideMacroNames(false), false)
+    equal(saved.hideMacroNames, true)
+    equal(button.Name.alpha, 0.8)
+    equal(button.Name.alphaWrites, 0)
+    game.bindingSet = 1
+    game.Flush()
+    equal(addon.state, "ready")
+    equal(addon.ShouldHideMacroNames(), true)
+    equal(button.Name.alpha, 0)
+end)
+
+test("forbidden macro regions and buttons are not modified and report restrictions once", function()
+    for _, forbiddenButton in ipairs({ false, true }) do
+        local button = mockMacroButton("ActionButton1", 1, "Macro")
+        if forbiddenButton then
+            button.forbidden = true
+        else
+            button.Name.forbidden = true
+        end
+        local _, addon, _, messages = ready({
+            actions = { [1] = "macro" },
+            setup = function(env)
+                env.MainActionBar = { actionButtons = { button } }
+            end,
+        })
+        assert(addon.SetHideMacroNames(true))
+        addon.RefreshActionLabels()
+        equal(button.Name.alpha, 0.8)
+        equal(button.Name.alphaWrites, 0)
+        equal(#messages, 1)
+        assert(messages[1]:find("restricted this macro name", 1, true))
+    end
+end)
+
+test("unreadable action data restores native name visibility rather than assuming a macro", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local _, addon, _, messages, game = ready({
+        database = macroProfile(true), actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    equal(button.Name.alpha, 0)
+    button.action = { secret = true }
+    addon.RefreshActionLabels()
+    equal(button.Name.alpha, 0.8)
+    button.action = 1
+    game.actions[1] = { secret = true }
+    addon.RefreshActionLabels()
+    equal(button.Name.alpha, 0.8)
+    equal(#messages, 1)
+    game.actions[1] = "macro"
+    addon.RefreshActionLabels()
+    equal(button.Name.alpha, 0)
+end)
+
+test("failed macro visibility writes release the recursion guard and remain recoverable", function()
+    local button = mockMacroButton("ActionButton1", 1, "Macro")
+    local _, addon = ready({
+        actions = { [1] = "macro" },
+        setup = function(env)
+            env.MainActionBar = { actionButtons = { button } }
+        end,
+    })
+    button.Name.rejectAlpha = true
+    local success, reason = pcall(addon.SetHideMacroNames, true)
+    equal(success, false)
+    assert(reason:find("Rejected alpha write", 1, true))
+    button.Name.rejectAlpha = false
+    addon.RefreshActionLabels()
+    equal(button.Name.alpha, 0)
+    button.Name:SetAlpha(0.3)
+    assert(addon.SetHideMacroNames(false))
+    equal(button.Name.alpha, 0.3)
 end)
 
 print(("%d tests passed"):format(passed))
