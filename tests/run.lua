@@ -113,14 +113,6 @@ local function loadAddon(options)
     environment.CleanBindsCharacterDB = options.characterDatabase
     environment.SlashCmdList = {}
     environment.Settings = {}
-    environment.SettingsPanel = {
-        SelectCategory = function()
-            error("The foundation must not navigate settings")
-        end,
-    }
-    environment.CreateSettingsButtonInitializer = function()
-        error("The foundation must not create settings buttons")
-    end
     environment.EventRegistry = { callbacks = {} }
     function environment.EventRegistry:RegisterCallback(event, callback, owner)
         local callbacks = self.callbacks[event] or {}
@@ -988,28 +980,6 @@ local function readySettings(options)
                     error("Unexpected initializer: " .. template)
                 end
                 return element
-            end
-            environment.CreateSettingsButtonInitializer = function(name, buttonText, callback, tooltip, addSearchTags)
-                local element = copyTable(initializer)
-                element.data = { name = name, buttonText = buttonText, buttonClick = callback, tooltip = tooltip }
-                if addSearchTags then
-                    element:AddSearchTags(name, buttonText)
-                end
-                return element
-            end
-            environment.SettingsPanel.SelectCategory = function(_, category, force)
-                game.navigation = { category = category, force = force }
-                if force or game.currentCategory ~= category then
-                    local previous = game.layouts[game.currentCategory]
-                    if previous and previous.frame then previous.frame:Hide() end
-                    game.searchText = ""
-                    game.currentCategory = category
-                    local layout = assert(game.layouts[category])
-                    if layout.frame then
-                        layout.frame:Show()
-                        layout.frame:OnRefresh()
-                    end
-                end
             end
             function game.Search(text)
                 game.searchText = text
@@ -3849,236 +3819,111 @@ test("missing native Settings callbacks fail without writing saved data", functi
     assert(messages[1]:find("EventRegistry.RegisterCallback", 1, true))
 end)
 
-local function findSearchEntry(game, query, category, name)
-    for _, result in ipairs(game.Search(query)) do
-        if result.category == category and result.initializer.data.name == name then
-            return result.initializer
-        end
-    end
-    error("Missing search entry: " .. name)
-end
-
-test("Options search finds the main controls by addon name as well as setting name", function()
-    local _, addon, _, _, _, game = readySettings()
-    for _, query in ipairs({ "Clean Binds", "CleanBinds", "cLeAnBiNdS" }) do
-        local results = game.Search(query)
-        equal(#results, 3)
-        local settings = {}
-        for _, result in ipairs(results) do
-            equal(result.category, addon.category)
-            settings[result.initializer.data.setting.variable] = true
-        end
-        assert(settings.CLEANBINDS_ENABLED)
-        assert(settings.CLEANBINDS_HIDE_MACRO_NAMES)
-        assert(settings.CLEANBINDS_KEYBIND_FONT_SIZE)
-    end
-    for _, query in ipairs({ addon.L.HIDE_MACRO_NAMES, addon.L.KEYBIND_FONT_SIZE, addon.L.ENABLE_LABELS }) do
-        local found = false
-        for _, result in ipairs(game.Search(query)) do
-            if result.initializer.data.name == query then found = true end
-        end
-        assert(found, query)
-    end
-end)
-
-test("search indexes redirect to existing canvas pages without adding visible categories or settings", function()
+test("Settings search registers only native setting-name metadata", function()
     local _, addon, _, pages, _, game = readySettings()
-    local visible, indexed = 0, 0
-    for _, category in ipairs(game.rootCategories) do
-        if category.redirectCategory then
-            indexed = indexed + 1
-            local target = game.layouts[category.redirectCategory]
-            equal(target:IsVerticalLayout(), false)
-            assert(target.frame.bar)
-            local entries = game.layouts[category].initializers
-            equal(#entries, #target.frame.rows + 1)
-        else
-            visible = visible + 1
-            equal(category, addon.category)
-        end
-    end
-    equal(visible, 1)
-    equal(indexed, #addon.Bars)
+    equal(#game.rootCategories, 1)
+    equal(game.rootCategories[1], addon.category)
     equal(#addon.category:GetSubcategories(), #pages)
-    local settings = 0
-    for _ in pairs(game.settings) do settings = settings + 1 end
-    equal(settings, 3)
+    equal(#game.categories, #pages + 1)
+    local searchable = 0
     for _, entry in ipairs(game.layouts[addon.category].initializers) do
         equal(entry.data.buttonClick, nil)
+        if entry.data.setting then
+            searchable = searchable + 1
+            equal(#entry.searchTags, 1)
+            equal(entry.searchTags[1], entry.data.setting.name:upper())
+        else
+            equal(entry.searchTags, nil)
+        end
     end
+    equal(searchable, 3)
+    for _, page in ipairs(pages) do
+        equal(game.layouts[page.category]:IsVerticalLayout(), false)
+    end
+    equal(#game.Search("CleanBinds"), 0)
 end)
 
-test("search Open actions select and scroll to every button without starting an edit", function()
-    local env, addon, _, pages, messages, game = readySettings()
+test("Options search finds the main controls by their native setting names", function()
+    local _, addon, _, _, _, game = readySettings()
+    for _, setting in ipairs({ game.enabledSetting, game.hideMacroNamesSetting, game.fontSizeSetting }) do
+        for _, query in ipairs({ setting.name, setting.name:lower(), setting.name:upper() }) do
+            local results = game.Search(query)
+            equal(#results, 1)
+            equal(results[1].category, addon.category)
+            equal(results[1].initializer.data.setting, setting)
+        end
+    end
+    equal(game.Search("font")[1].initializer.data.setting, game.fontSizeSetting)
+    equal(game.Search("macro")[1].initializer.data.setting, game.hideMacroNamesSetting)
+end)
+
+test("opening a label editor scrolls its row into view", function()
+    local env, _, _, pages, messages = readySettings()
     for _, page in ipairs(pages) do
-        local barEntry = findSearchEntry(game, addon.GetBarName(page.bar),
-            page.category, addon.GetBarName(page.bar))
-        barEntry.data.buttonClick()
-        equal(game.currentCategory, page.category)
-        equal(game.searchText, "")
-        equal(game.navigation.force, true)
+        page:Show()
         page.Scroll:SetHeight(50)
         for _, row in ipairs(page.rows) do
-            local entry = findSearchEntry(game, row.name, page.category, row.name)
             page.Scroll:SetVerticalScroll(0)
-            entry.data.buttonClick()
-            equal(game.currentCategory, page.category)
-            equal(game.searchText, "")
-            equal(game.navigation.force, true)
-            equal(page:IsShown(), true)
+            row.Override:OnClick()
             equal(page.selectedRow, row)
-            equal(row.Highlight:IsShown(), true)
-            equal(page.PreviewTitle:GetText(), row.name)
+            equal(page.editingRow, row)
             equal(page.Scroll:GetVerticalScroll(), math.max(0, row.index * 25 - 50))
-            equal(page.editingRow, nil)
-            equal(row.Editor:IsShown(), false)
-            assert(not row.Editor.focused)
+            row.Editor:OnEscapePressed()
         end
+        page.Scroll:SetVerticalScroll(100)
+        page.rows[1].Override:OnClick()
+        equal(page.Scroll:GetVerticalScroll(), 0)
+        page.rows[1].Editor:OnEscapePressed()
+        page:Hide()
     end
     equal(next(env.CleanBindsDB.overrides), nil)
     equal(next(env.CleanBindsDB.bindingSnapshots), nil)
-    equal(game.enabledSetting.writes, 0)
-    equal(game.hideMacroNamesSetting.writes, 0)
-    equal(game.fontSizeSetting.writes, 0)
     equal(#messages, 0)
 end)
 
-test("search navigation exits results even when the destination page was already selected", function()
-    local env, _, _, pages, _, game = readySettings()
-    local page = pages[2]
-    env.SettingsPanel:SelectCategory(page.category, true)
-    local entry = findSearchEntry(game, page.rows[3].name, page.category, page.rows[3].name)
-    equal(game.currentCategory, page.category)
-    equal(page:IsShown(), false)
-    entry.data.buttonClick()
-    equal(game.searchText, "")
-    equal(page:IsShown(), true)
-    equal(page.selectedRow, page.rows[3])
-    equal(page.editingRow, nil)
-end)
-
-test("search supports native localized button names and numbered main-bar aliases", function()
-    local _, addon, _, pages, _, game = readySettings({
-        bindingNames = { MULTIACTIONBAR1BUTTON3 = "Localized button three" },
-    })
-    local page = pages[2]
-    local entry = findSearchEntry(game, "localized button three", page.category, "Localized button three")
-    entry.data.buttonClick()
-    equal(page.selectedRow, page.rows[3])
-    entry = findSearchEntry(game, "Action Bar 2 Button 3", page.category, page.rows[3].name)
-    entry.data.buttonClick()
-    equal(page.selectedRow, page.rows[3])
-    local main = pages[1]
-    entry = findSearchEntry(game, "Action Bar 1", main.category, addon.GetBarName(main.bar))
-    entry.data.buttonClick()
-    equal(game.currentCategory, main.category)
-    entry = findSearchEntry(game, "Action Bar 1 Button 12", main.category, main.rows[12].name)
-    entry.data.buttonClick()
-    equal(main.selectedRow, main.rows[12])
-end)
-
-test("search navigation reads the current binding scope and stays available in combat", function()
-    local env, addon, _, pages, messages, game = readySettings()
-    local page = pages[2]
-    assert(addon.SetLabel(page.bar, 1, "Account"))
-    local entry = findSearchEntry(game, page.rows[1].name, page.category, page.rows[1].name)
+test("native option search follows the active scope and respects combat restrictions", function()
+    local env, addon, _, _, messages, game = readySettings()
     game.Switch(2)
-    assert(addon.SetLabel(page.bar, 1, "Character"))
+    assert(addon.SetHideMacroNames(true))
+    local result = game.Search("macro")[1]
+    equal(result.initializer.data.setting:GetValue(), true)
     game.combat = true
-    entry.data.buttonClick()
-    equal(page.selectedRow, page.rows[1])
-    equal(page.rows[1].Override:GetText(), "Character")
-    equal(page.rows[1].Override.enabled, false)
-    equal(page.Description:GetText(), addon.L.CHARACTER_NOTICE)
-    equal(page.editingRow, nil)
-    equal(env.CleanBindsDB.overrides["actionbar2:1"], "Account")
-    equal(env.CleanBindsCharacterDB.overrides["actionbar2:1"], "Character")
-    equal(#messages, 0)
-    for _, result in ipairs(game.Search("Clean Binds")) do
-        equal(result.initializer.canModify(), false)
+    for _, name in ipairs({ addon.L.ENABLE_LABELS, addon.L.HIDE_MACRO_NAMES, addon.L.KEYBIND_FONT_SIZE }) do
+        equal(game.Search(name)[1].initializer.canModify(), false)
     end
+    equal(env.CleanBindsDB.hideMacroNames, false)
+    equal(env.CleanBindsCharacterDB.hideMacroNames, true)
+    equal(#messages, 0)
 end)
 
-test("search does not index saved label values, current keys, or the generic Open caption", function()
+test("search does not add custom labels, keys, or navigation entries", function()
     local _, addon, _, _, _, game = readySettings({
         bindings = { ACTIONBUTTON1 = { "UNIQUE_BINDING_VALUE" } },
     })
     assert(addon.SetLabel(addon.Bars[1], 1, "UniqueSavedLabel"))
-    for _, query in ipairs({ "UniqueSavedLabel", "UNIQUE_BINDING_VALUE", "Open", "[" }) do
+    for _, query in ipairs({
+        "UniqueSavedLabel", "UNIQUE_BINDING_VALUE", "CleanBinds", "Action Bar 2 Button 3", "Open", "[",
+    }) do
         equal(#game.Search(query), 0)
     end
     equal(addon.GetLabel(addon.Bars[1], 1), "UniqueSavedLabel")
 end)
 
-test("search navigation preserves the existing save-or-cancel behavior of unfinished edits", function()
+test("native settings search preserves the save-or-cancel behavior of unfinished edits", function()
     for _, valid in ipairs({ false, true }) do
-        local env, addon, _, pages, messages, game = readySettings()
-        local previous, destination = pages[1], pages[2]
-        env.SettingsPanel:SelectCategory(previous.category, true)
-        assert(addon.SetLabel(previous.bar, 1, "Original"))
-        previous.rows[1].Override:OnClick()
-        previous.rows[1].Editor:SetText(valid and "Draft" or "Invalid\nlabel")
-        local entry = findSearchEntry(game, destination.rows[2].name,
-            destination.category, destination.rows[2].name)
-        entry.data.buttonClick()
-        equal(previous.editingRow, nil)
-        equal(addon.GetLabel(previous.bar, 1), valid and "Draft" or "Original")
-        equal(destination.selectedRow, destination.rows[2])
-        equal(destination.editingRow, nil)
+        local _, addon, _, pages, messages, game = readySettings()
+        local page = pages[1]
+        page:Show()
+        game.currentCategory = page.category
+        assert(addon.SetLabel(page.bar, 1, "Original"))
+        page.rows[1].Override:OnClick()
+        page.rows[1].Editor:SetText(valid and "Draft" or "Invalid\nlabel")
+        local results = game.Search("font")
+        equal(results[1].initializer.data.setting, game.fontSizeSetting)
+        equal(page:IsShown(), false)
+        equal(page.editingRow, nil)
+        equal(addon.GetLabel(page.bar, 1), valid and "Draft" or "Original")
         equal(#messages, valid and 0 or 1)
-    end
-end)
-
-test("search-only categories do not interfere with native main Defaults or per-bar reset", function()
-    local env, addon, _, pages, _, game = readySettings()
-    assert(addon.SetLabel(addon.Bars[1], 1, "First"))
-    assert(addon.SetLabel(addon.Bars[2], 1, "Second"))
-    assert(addon.SetHideMacroNames(true))
-    assert(addon.SetKeybindFontSize(14))
-    local calls, reset = 0, addon.ResetLabels
-    addon.ResetLabels = function(...)
-        calls = calls + 1
-        return reset(...)
-    end
-    for _, category in ipairs(game.rootCategories) do
-        if category.redirectCategory then
-            game.DefaultSettings("these", category)
-        end
-    end
-    equal(calls, 0)
-    local entry = findSearchEntry(game, pages[1].rows[1].name, pages[1].category, pages[1].rows[1].name)
-    entry.data.buttonClick()
-    game.ResetBar(pages[1])
-    equal(calls, 1)
-    equal(addon.GetLabel(addon.Bars[1], 1), nil)
-    equal(addon.GetLabel(addon.Bars[2], 1), "Second")
-    equal(addon.ShouldHideMacroNames(), true)
-    equal(addon.GetKeybindFontSize(), 14)
-    env.SettingsPanel:SelectCategory(addon.category, true)
-    game.DefaultSettings("these", addon.category)
-    equal(calls, 2)
-    equal(addon.GetLabel(addon.Bars[2], 1), nil)
-    equal(addon.ShouldHideMacroNames(), false)
-    equal(addon.GetKeybindFontSize(), nil)
-end)
-
-test("missing native search navigation capabilities fail without writing saved data", function()
-    for _, missing in ipairs({ "SettingsPanel.SelectCategory", "CreateSettingsButtonInitializer" }) do
-        local env, addon, fire, messages = loadAddon({
-            loggedIn = true,
-            setup = function(environment)
-                if missing == "SettingsPanel.SelectCategory" then
-                    environment.SettingsPanel.SelectCategory = nil
-                else
-                    environment.CreateSettingsButtonInitializer = nil
-                end
-            end,
-        })
-        fire("ADDON_LOADED", "CleanBinds")
-        equal(addon.state, "failed")
-        equal(env.CleanBindsDB, nil)
-        equal(env.CleanBindsCharacterDB, nil)
-        assert(messages[1]:find(missing, 1, true))
     end
 end)
 
