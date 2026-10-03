@@ -62,7 +62,8 @@ end
 
 function CleanBindsFontSizeSliderMixin:OnSliderValueChanged(value)
     if not self.synchronizing then
-        value = NormalizeFontSliderSize(value)
+        -- Native steppers can emit fractions when starting from a fractional default.
+        value = math.floor(value + 0.5)
         local font, nativeSize = addon.GetPreviewKeybindFont(addon.GetBarButton(addon.Bars[1], 1), true)
         if font and ApproximatelyEqual(value, nativeSize) then
             value = 0

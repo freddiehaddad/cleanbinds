@@ -952,6 +952,11 @@ local function readySettings(options)
                         end
                     end
                 end
+                function slider:OnStepperClicked(forward)
+                    local options = self.options
+                    local step = (options.maxValue - options.minValue) / options.steps
+                    self:SetValue(self.value + (forward and step or -step))
+                end
                 function slider:SetEnabled(enabled) self.enabled = enabled end
                 slider.canModify = function() return controlInitializer.canModify() end
                 local control = { SliderWithSteppers = slider }
@@ -3286,6 +3291,42 @@ test("font-size precision tolerance does not hide a genuinely fractional native 
     equal(game.fontSlider.value, 12.25)
     equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12.25))
     equal(select(2, button.HotKey:GetFont()), 12.25)
+end)
+
+test("step buttons accept whole-number choices from a genuinely fractional native font", function()
+    for _, case in ipairs({
+        { native = 11.25, larger = 12, smaller = 10 },
+        { native = 12.25, larger = 13, smaller = 11 },
+        { native = 12.75, larger = 14, smaller = 12 },
+        { native = 13.25, larger = 14, smaller = 12 },
+    }) do
+        local nativeSize = case.native
+        local env, addon, fire, _, messages, game = readySettings({
+            bindings = { ACTIONBUTTON1 = { "F" } },
+        })
+        local button = mockButton("ActionButton1", "F")
+        button.HotKey.fontObject = mockFontObject(nativeSize)
+        env.MainActionBar = { actionButtons = { button } }
+        fire("ADDON_LOADED", "Blizzard_ActionBar")
+        game.Flush()
+        for _, forward in ipairs({ true, false }) do
+            equal(game.fontSlider.value, nativeSize)
+            local expected = forward and case.larger or case.smaller
+            game.fontSlider:OnStepperClicked(forward)
+            equal(addon.GetKeybindFontSize(), expected)
+            equal(env.CleanBindsDB.keybindFontSize, expected)
+            equal(game.fontSlider.value, expected)
+            equal(game.fontSlider.label, tostring(expected))
+            equal(select(2, button.HotKey:GetFont()), expected)
+            equal(button.HotKey:GetHeight(), 10)
+            game.fontPreview.Reset:OnClick()
+            equal(addon.GetKeybindFontSize(), nil)
+            equal(game.fontSlider.value, nativeSize)
+            equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(nativeSize))
+            equal(select(2, button.HotKey:GetFont()), nativeSize)
+        end
+        equal(#messages, 0)
+    end
 end)
 
 test("native font precision does not cause repeated writes or lose font-object tracking", function()
