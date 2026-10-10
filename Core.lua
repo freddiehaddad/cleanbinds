@@ -126,22 +126,26 @@ end
 local events = CreateFrame("Frame")
 local bindingStartupEvents = { "BINDINGS_LOADED", "UPDATE_BINDINGS", "PLAYER_ENTERING_WORLD" }
 local initializationQueued = false
+local bindingsLoaded = false
+local loadedAfterLogin = false
 
 local function InitializeBindings()
-    if GetCurrentBindingSet() == Enum.BindingSet.Default then
+    -- Login and a selected scope can both precede the saved binding load.
+    if (not bindingsLoaded and not loadedAfterLogin) or GetCurrentBindingSet() == Enum.BindingSet.Default then
         addon.state = "waiting_bindings"
         return
     end
 
-    local initialized, databaseError = addon.InitializeLabels()
+    -- A late load may have missed BINDINGS_LOADED; retain unconfirmed differences.
+    local initialized, databaseError = addon.InitializeLabels(not bindingsLoaded)
     if not initialized then
         Fail(databaseError)
-        return
+    else
+        addon.InitializeSettings()
+        addon.InitializeActionLabels()
+        addon.state = "ready"
     end
-
-    addon.InitializeSettings()
-    addon.InitializeActionLabels()
-    addon.state = "ready"
+    events:UnregisterAllEvents()
 end
 
 local function QueueInitialization()
@@ -156,17 +160,13 @@ local function QueueInitialization()
             return
         end
         InitializeBindings()
-        if addon.state ~= "waiting_bindings" then
-            for _, event in ipairs(bindingStartupEvents) do
-                events:UnregisterEvent(event)
-            end
-        end
     end)
 end
 
 local function Initialize()
     local capabilityError = CheckCapabilities()
     if capabilityError then
+        events:UnregisterAllEvents()
         Fail(capabilityError)
         return
     end
@@ -219,6 +219,7 @@ SlashCmdList.CLEANBINDS = function(message)
     end
 end
 
+events:RegisterEvent("BINDINGS_LOADED")
 events:RegisterEvent("ADDON_LOADED")
 events:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" then
@@ -226,7 +227,8 @@ events:SetScript("OnEvent", function(self, event, name)
             return
         end
         self:UnregisterEvent("ADDON_LOADED")
-        if IsLoggedIn() then
+        loadedAfterLogin = IsLoggedIn()
+        if loadedAfterLogin then
             Initialize()
         else
             self:RegisterEvent("PLAYER_LOGIN")
@@ -234,6 +236,11 @@ events:SetScript("OnEvent", function(self, event, name)
     elseif event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         Initialize()
+    elseif event == "BINDINGS_LOADED" then
+        bindingsLoaded = true
+        if addon.state == "waiting_bindings" then
+            QueueInitialization()
+        end
     elseif addon.state == "waiting_bindings" then
         QueueInitialization()
     end

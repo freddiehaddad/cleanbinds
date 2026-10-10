@@ -105,6 +105,7 @@ local function loadAddon(options)
         savedBindings = options.savedBindings or {},
         actions = options.actions or {},
         combat = false,
+        loggedIn = options.loggedIn or false,
     }
     game.savedBindings[game.bindingSet] = copyTable(game.bindings)
     local environment = setmetatable({}, { __index = _G })
@@ -159,7 +160,7 @@ local function loadAddon(options)
         return "1.60.1", "70009", "", options.interface or 16001
     end
     environment.IsLoggedIn = function()
-        return options.loggedIn or false
+        return game.loggedIn
     end
     environment.print = function(message)
         messages[#messages + 1] = message
@@ -230,6 +231,9 @@ local function loadAddon(options)
         function frame:UnregisterEvent(event)
             self.registered[event] = nil
         end
+        function frame:UnregisterAllEvents()
+            self.registered = {}
+        end
         function frame:SetScript(script, callback)
             self[script] = callback
         end
@@ -268,6 +272,9 @@ local function loadAddon(options)
     end
 
     local function fire(event, ...)
+        if event == "PLAYER_LOGIN" then
+            game.loggedIn = true
+        end
         for _, frame in ipairs(frames) do
             if frame.registered[event] then
                 frame.OnEvent(frame, event, ...)
@@ -344,6 +351,9 @@ test("initializes fresh account data after login", function()
     fire("ADDON_LOADED", "AnotherAddon")
     equal(env.CleanBindsDB, nil)
     fire("ADDON_LOADED", "CleanBinds")
+    equal(addon.state, "loading")
+    equal(env.CleanBindsDB, nil)
+    fire("BINDINGS_LOADED")
     equal(addon.state, "loading")
     equal(env.CleanBindsDB, nil)
     fire("PLAYER_LOGIN")
@@ -449,6 +459,7 @@ test("binding lifecycle events recover startup without polling or duplicate init
         fire(event)
         equal(initializations, 0)
         fire("ADDON_LOADED", "CleanBinds")
+        fire("BINDINGS_LOADED")
         fire("PLAYER_LOGIN")
         game.Flush()
         equal(addon.state, "waiting_bindings")
@@ -646,9 +657,11 @@ end)
 
 local function ready(options)
     options = options or {}
-    options.loggedIn = true
+    options.loggedIn = false
     local env, addon, fire, messages, game = loadAddon(options)
     fire("ADDON_LOADED", "CleanBinds")
+    fire("BINDINGS_LOADED")
+    fire("PLAYER_LOGIN")
     equal(addon.state, "ready")
     return env, addon, fire, messages, game
 end
@@ -1174,6 +1187,7 @@ test("initializes saved data loaded after addon files but before login", functio
     fire("ADDON_LOADED", "CleanBinds")
     equal(addon.state, "loading")
     equal(env.CleanBindsDB, saved)
+    fire("BINDINGS_LOADED")
     fire("PLAYER_LOGIN")
     equal(addon.db, saved)
     equal(addon.db.enabled, false)
@@ -2216,6 +2230,7 @@ test("deferred startup reconciles changed bindings only after the scope is known
 
     game.bindingSet = 1
     game.bindings = { ACTIONBUTTON1 = { "H" } }
+    fire("BINDINGS_LOADED")
     fire("UPDATE_BINDINGS")
     game.Flush()
     equal(addon.state, "ready")
@@ -2225,6 +2240,105 @@ test("deferred startup reconciles changed bindings only after the scope is known
     equal(character.bindingSnapshots["actionbar1:1"].keyboard, "G")
     equal(#messages, 2)
     assert(messages[2]:find("displayed binding changed", 1, true))
+end)
+
+test("login and world entry cannot reconcile defaults before saved bindings finish loading", function()
+    for _, scope in ipairs({ 1, 2 }) do
+        local saved = {
+            schemaVersion = 1, enabled = true,
+            overrides = {
+                ["actionbar1:5"] = "S1", ["actionbar1:8"] = "Eight",
+                ["actionbar2:10"] = "Mouse4", ["pet:1"] = "PetUp",
+            },
+            bindingSnapshots = {
+                ["actionbar1:5"] = bindingSnapshot("ACTIONBUTTON5", "SHIFT-1"),
+                ["actionbar1:8"] = bindingSnapshot("ACTIONBUTTON8", "8"),
+                ["actionbar2:10"] = bindingSnapshot("MULTIACTIONBAR1BUTTON10", "BUTTON4"),
+                ["pet:1"] = bindingSnapshot("BONUSACTIONBUTTON1", "CTRL-MOUSEWHEELUP"),
+            },
+        }
+        local inactive = { schemaVersion = 1, enabled = true, overrides = {}, bindingSnapshots = {} }
+        local button = mockButton("ActionButton5", "5")
+        local _, addon, fire, messages, game = loadAddon({
+            bindingSet = scope,
+            database = scope == 1 and saved or inactive,
+            characterDatabase = scope == 2 and saved or inactive,
+            bindings = {
+                ACTIONBUTTON5 = { "5" }, ACTIONBUTTON8 = { "8" },
+                BONUSACTIONBUTTON1 = { "CTRL-1" },
+            },
+            setup = function(env)
+                env.MainActionBar = { actionButtons = { [5] = button } }
+            end,
+        })
+        fire("ADDON_LOADED", "CleanBinds")
+        fire("UPDATE_BINDINGS")
+        fire("PLAYER_LOGIN")
+        equal(saved.overrides["actionbar1:5"], "S1")
+        equal(saved.overrides["actionbar2:10"], "Mouse4")
+        equal(saved.overrides["pet:1"], "PetUp")
+        equal(addon.state, "waiting_bindings")
+        equal(addon.db, nil)
+        equal(addon.category, nil)
+        for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "VARIABLES_LOADED", "UPDATE_BINDINGS" }) do
+            fire(event)
+            game.Flush()
+            equal(addon.state, "waiting_bindings")
+            equal(saved.bindingSnapshots["actionbar1:5"].keyboard, "SHIFT-1")
+            equal(saved.overrides["actionbar1:5"], "S1")
+            equal(button.HotKey.writes, 0)
+        end
+        game.bindings = {
+            ACTIONBUTTON5 = { "SHIFT-1" }, ACTIONBUTTON8 = { "8" },
+            MULTIACTIONBAR1BUTTON10 = { "BUTTON4" }, BONUSACTIONBUTTON1 = { "CTRL-MOUSEWHEELUP" },
+        }
+        button.HotKey:SetText("S-1")
+        fire("UPDATE_BINDINGS")
+        game.Flush()
+        equal(addon.state, "waiting_bindings")
+        fire("BINDINGS_LOADED")
+        equal(addon.state, "waiting_bindings")
+        game.Flush()
+        equal(addon.state, "ready")
+        equal(addon.db, saved)
+        equal(addon.GetLabel(addon.Bars[1], 5), "S1")
+        equal(addon.GetLabel(addon.Bars[1], 8), "Eight")
+        equal(addon.GetLabel(addon.Bars[2], 10), "Mouse4")
+        equal(addon.GetLabel(addon.Bars[9], 1), "PetUp")
+        equal(button.HotKey:GetText(), "S1")
+        equal(next(inactive.overrides), nil)
+        equal(next(inactive.bindingSnapshots), nil)
+        equal(#messages, 1)
+    end
+end)
+
+test("a late-loaded addon preserves uncertain labels until bindings arrive or are saved", function()
+    for _, restoresBinding in ipairs({ true, false }) do
+        local saved = {
+            schemaVersion = 1, enabled = true,
+            overrides = { ["actionbar1:5"] = "S1" },
+            bindingSnapshots = { ["actionbar1:5"] = bindingSnapshot("ACTIONBUTTON5", "SHIFT-1") },
+        }
+        local _, addon, fire, _, game = loadAddon({
+            loggedIn = true, database = saved, bindings = { ACTIONBUTTON5 = { "5" } },
+        })
+        fire("ADDON_LOADED", "CleanBinds")
+        equal(addon.state, "ready")
+        equal(addon.GetLabel(addon.Bars[1], 5), nil)
+        equal(saved.overrides["actionbar1:5"], "S1")
+        equal(saved.bindingSnapshots["actionbar1:5"].keyboard, "SHIFT-1")
+        if restoresBinding then
+            game.bindings.ACTIONBUTTON5 = { "SHIFT-1" }
+            fire("BINDINGS_LOADED")
+            game.Flush()
+            equal(addon.GetLabel(addon.Bars[1], 5), "S1")
+            equal(saved.overrides["actionbar1:5"], "S1")
+        else
+            game.Save()
+            equal(saved.overrides["actionbar1:5"], nil)
+            equal(saved.bindingSnapshots["actionbar1:5"], nil)
+        end
+    end
 end)
 
 local function macroProfile(hidden)

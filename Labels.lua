@@ -412,14 +412,14 @@ local function RetryBindingReads()
     end
 end
 
-function addon.InitializeLabels()
+function addon.InitializeLabels(preserveUncertain)
     for _, bar in ipairs(addon.Bars) do
         bars[bar.id] = true
         for index = 1, bar.buttonCount do
             slots[LabelKey(bar, index)] = { bar = bar, index = index }
         end
     end
-    local initialized, reason = ActivateScope(GetCurrentBindingSet())
+    local initialized, reason = ActivateScope(GetCurrentBindingSet(), preserveUncertain)
     if not initialized then
         return false, reason
     end
