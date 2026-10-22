@@ -878,6 +878,8 @@ local function readySettings(options)
                 end
                 if variable == "CLEANBINDS_ENABLED" then
                     game.enabledSetting = setting
+                elseif variable == "CLEANBINDS_HIDE_KEYBIND_LABELS" then
+                    game.hideKeybindLabelsSetting = setting
                 elseif variable == "CLEANBINDS_HIDE_MACRO_NAMES" then
                     game.hideMacroNamesSetting = setting
                 elseif variable == "CLEANBINDS_KEYBIND_FONT_SIZE" then
@@ -1484,6 +1486,24 @@ local function mockButton(name, text, shown)
         end
         self.text = value
         self.writes = self.writes + 1
+    end
+    function hotkey:Show()
+        if self.rejectWrite then
+            error("Rejected show write")
+        end
+        self.shown = true
+    end
+    function hotkey:Hide()
+        if self.rejectWrite then
+            error("Rejected hide write")
+        end
+        self.shown = false
+    end
+    function hotkey:IsShown()
+        return self.shown
+    end
+    function hotkey:SetVertexColor(...)
+        self.vertexColor = { ... }
     end
     function hotkey:IsForbidden()
         return self.forbidden or false
@@ -3927,7 +3947,7 @@ test("Settings search registers only native setting-name metadata", function()
             equal(entry.searchTags, nil)
         end
     end
-    equal(searchable, 3)
+    equal(searchable, 4)
     for _, page in ipairs(pages) do
         equal(game.layouts[page.category]:IsVerticalLayout(), false)
     end
@@ -3936,16 +3956,24 @@ end)
 
 test("Options search finds the main controls by their native setting names", function()
     local _, addon, _, _, _, game = readySettings()
-    for _, setting in ipairs({ game.enabledSetting, game.hideMacroNamesSetting, game.fontSizeSetting }) do
+    for _, setting in ipairs({
+        game.enabledSetting, game.hideKeybindLabelsSetting, game.hideMacroNamesSetting, game.fontSizeSetting,
+    }) do
         for _, query in ipairs({ setting.name, setting.name:lower(), setting.name:upper() }) do
-            local results = game.Search(query)
-            equal(#results, 1)
-            equal(results[1].category, addon.category)
-            equal(results[1].initializer.data.setting, setting)
+            local found = false
+            for _, result in ipairs(game.Search(query)) do
+                equal(result.category, addon.category)
+                if result.initializer.data.setting == setting then
+                    found = true
+                end
+            end
+            assert(found, query)
         end
     end
-    equal(game.Search("font")[1].initializer.data.setting, game.fontSizeSetting)
+    equal(game.Search("custom")[1].initializer.data.setting, game.enabledSetting)
+    equal(game.Search("keybind")[1].initializer.data.setting, game.hideKeybindLabelsSetting)
     equal(game.Search("macro")[1].initializer.data.setting, game.hideMacroNamesSetting)
+    equal(game.Search("font")[1].initializer.data.setting, game.fontSizeSetting)
 end)
 
 test("opening a label editor scrolls its row into view", function()
@@ -3979,7 +4007,9 @@ test("native option search follows the active scope and respects combat restrict
     local result = game.Search("macro")[1]
     equal(result.initializer.data.setting:GetValue(), true)
     game.combat = true
-    for _, name in ipairs({ addon.L.ENABLE_LABELS, addon.L.HIDE_MACRO_NAMES, addon.L.KEYBIND_FONT_SIZE }) do
+    for _, name in ipairs({
+        addon.L.ENABLE_LABELS, addon.L.HIDE_KEYBIND_LABELS, addon.L.HIDE_MACRO_NAMES, addon.L.KEYBIND_FONT_SIZE,
+    }) do
         equal(game.Search(name)[1].initializer.canModify(), false)
     end
     equal(env.CleanBindsDB.hideMacroNames, false)
@@ -4016,6 +4046,73 @@ test("native settings search preserves the save-or-cancel behavior of unfinished
         equal(addon.GetLabel(page.bar, 1), valid and "Draft" or "Original")
         equal(#messages, valid and 0 or 1)
     end
+end)
+
+test("hiding keybind labels uses the unbound range indicator state and restores cleanly", function()
+    local env, addon, fire, pages, _, game = readySettings({
+        bindings = { ACTIONBUTTON1 = { "F" }, ACTIONBUTTON2 = {}, SHAPESHIFTBUTTON1 = { "G" } },
+    })
+    env.ACTIONBAR_HOTKEY_FONT_COLOR = { GetRGB = function() return 0.6, 0.6, 0.6 end }
+    local bound = mockButton("ActionButton1", "F", true)
+    local unbound = mockButton("ActionButton2", "*", false)
+    local stance = mockButton("StanceButton1", "", true)
+    env.MainActionBar = { actionButtons = { bound, unbound } }
+    env.StanceBar = { actionButtons = { stance } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    assert(addon.SetLabel(addon.Bars[1], 1, "MWD"))
+    assert(addon.SetLabel(addon.Bars[10], 1, "Bear"))
+    assert(addon.SetKeybindFontSize(14))
+    equal(bound.HotKey:GetText(), "MWD")
+    equal(bound.HotKey:IsShown(), true)
+    equal(select(2, bound.HotKey:GetFont()), 14)
+    equal(stance.HotKey:GetText(), "Bear")
+
+    game.hideKeybindLabelsSetting:SetValue(true)
+    equal(addon.ShouldHideKeybindLabels(), true)
+    equal(bound.HotKey:GetText(), "*")
+    equal(bound.HotKey:IsShown(), false)
+    equal(select(2, bound.HotKey:GetFont()), 11)
+    equal(unbound.HotKey:GetText(), "*")
+    equal(unbound.HotKey:IsShown(), false)
+    equal(stance.HotKey:GetText(), "")
+    equal(stance.HotKey:IsShown(), false)
+    equal(addon.GetLabel(addon.Bars[1], 1), "MWD")
+
+    -- Simulate Blizzard's ActionButton_UpdateRangeIndicator showing and coloring the range dot.
+    bound.HotKey:SetVertexColor(1, 0, 0)
+    bound.HotKey:Show()
+    addon.RefreshActionLabels()
+    equal(bound.HotKey:IsShown(), true)
+    equal(bound.HotKey:GetText(), "*")
+
+    -- Simulate Blizzard's UpdateHotkeys calling SetText followed immediately by Show.
+    bound.HotKey:SetText("F")
+    bound.HotKey:Show()
+    equal(bound.HotKey:GetText(), "*")
+    equal(bound.HotKey:IsShown(), false)
+    game.Flush()
+
+    -- Restoring while the range dot is hidden resets stale red vertex color and shows the label.
+    game.hideKeybindLabelsSetting:SetValue(false)
+    equal(addon.ShouldHideKeybindLabels(), false)
+    equal(bound.HotKey:GetText(), "MWD")
+    equal(bound.HotKey:IsShown(), true)
+    equal(bound.HotKey.vertexColor[1], 0.6)
+    equal(select(2, bound.HotKey:GetFont()), 14)
+    equal(stance.HotKey:GetText(), "Bear")
+    equal(stance.HotKey:IsShown(), true)
+
+    -- Reset This Bar leaves hideKeybindLabels intact; main Defaults resets it.
+    game.hideKeybindLabelsSetting:SetValue(true)
+    game.ResetBar(pages[1])
+    equal(addon.ShouldHideKeybindLabels(), true)
+    equal(bound.HotKey:GetText(), "*")
+    equal(bound.HotKey:IsShown(), false)
+    game.DefaultSettings("these", addon.category)
+    equal(addon.ShouldHideKeybindLabels(), false)
+    equal(bound.HotKey:GetText(), "F")
+    equal(bound.HotKey:IsShown(), true)
 end)
 
 print(("%d tests passed"):format(passed))

@@ -31,8 +31,9 @@ Download on [CurseForge](https://www.curseforge.com/wow/addons/cleanbinds) |
   bars or changing their layout.
 - **Adjustable keybind font size.** Make labels easier to read without
   enlarging your action buttons. Keep Blizzard's font style and colors.
-- **Optional macro-name hiding.** Keep macro names off your action buttons
-  without renaming your macros.
+- **Optional label and macro-name hiding.** Hide keybinding labels (while
+  keeping the range indicator dot) or macro names on your action buttons without
+  changing your bindings or renaming your macros.
 - **Built into Options.** Browse buttons by action bar and preview your labels
   as you type.
 - **Shared or character-specific settings.** Labels automatically follow WoW's
@@ -64,8 +65,9 @@ Restart WoW and enable **Clean Binds** in the AddOns list.
 3. Click a button's **Custom label** field, enter a label such as `MWD`, and
    press Enter. The label appears on the action button immediately.
 
-Options **Search** can find **Enable custom labels**, **Hide macro names**, and
-**Keybinding font size**. Use the Clean Binds sidebar to choose an action bar.
+Options **Search** can find **Enable custom labels**, **Hide keybind labels**,
+**Hide macro names**, and **Keybinding font size**. Use the Clean Binds sidebar
+to choose an action bar.
 Addon-name and bar/button search shortcuts are temporarily unavailable while
 [a search issue](https://github.com/freddiehaddad/cleanbinds/issues/9) is addressed.
 

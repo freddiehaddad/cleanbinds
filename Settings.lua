@@ -3,6 +3,7 @@ local L = addon.L
 local pages = {}
 local descriptions = {}
 local enabledSetting
+local hideKeybindLabelsSetting
 local hideMacroNamesSetting
 local fontSizeSetting
 local pendingReset
@@ -368,6 +369,9 @@ local function RefreshPages()
     if enabledSetting then
         enabledSetting:NotifyUpdate()
     end
+    if hideKeybindLabelsSetting then
+        hideKeybindLabelsSetting:NotifyUpdate()
+    end
     if hideMacroNamesSetting then
         hideMacroNamesSetting:NotifyUpdate()
     end
@@ -599,6 +603,15 @@ function addon.InitializeSettings()
             end
         end)
     LockWhenUnavailable(Settings.CreateCheckbox(category, enabledSetting, L.ENABLE_TOOLTIP))
+
+    hideKeybindLabelsSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_HIDE_KEYBIND_LABELS",
+        Settings.VarType.Boolean, L.HIDE_KEYBIND_LABELS, false, addon.ShouldHideKeybindLabels, function(value)
+            local success, reason = addon.SetHideKeybindLabels(value)
+            if not success then
+                addon.Print(reason)
+            end
+        end)
+    LockWhenUnavailable(Settings.CreateCheckbox(category, hideKeybindLabelsSetting, L.HIDE_KEYBIND_LABELS_TOOLTIP))
 
     hideMacroNamesSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_HIDE_MACRO_NAMES",
         Settings.VarType.Boolean, L.HIDE_MACRO_NAMES, false, addon.ShouldHideMacroNames, function(value)
