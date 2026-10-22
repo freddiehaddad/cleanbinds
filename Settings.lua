@@ -2,10 +2,7 @@ local _, addon = ...
 local L = addon.L
 local pages = {}
 local descriptions = {}
-local enabledSetting
-local hideKeybindLabelsSetting
-local hideMacroNamesSetting
-local fontSizeSetting
+local proxySettings = {}
 local pendingReset
 local rowHeight = 25
 local previewSize = 56
@@ -366,17 +363,8 @@ local function RefreshPage(page)
 end
 
 local function RefreshPages()
-    if enabledSetting then
-        enabledSetting:NotifyUpdate()
-    end
-    if hideKeybindLabelsSetting then
-        hideKeybindLabelsSetting:NotifyUpdate()
-    end
-    if hideMacroNamesSetting then
-        hideMacroNamesSetting:NotifyUpdate()
-    end
-    if fontSizeSetting then
-        fontSizeSetting:NotifyUpdate()
+    for _, setting in ipairs(proxySettings) do
+        setting:NotifyUpdate()
     end
     for frame in pairs(descriptions) do
         frame.Text:SetText(frame.initializer.data.text())
@@ -586,46 +574,39 @@ local function LockWhenUnavailable(initializer)
     initializer:AddEvaluateStateCVar("CLEANBINDS_ENABLED")
 end
 
+local function RegisterCheckbox(category, variable, name, defaultValue, getter, setter, tooltip)
+    local setting = Settings.RegisterProxySetting(category, variable,
+        Settings.VarType.Boolean, name, defaultValue, getter, function(value)
+            local success, reason = setter(value)
+            if not success then
+                addon.Print(reason)
+            end
+        end)
+    proxySettings[#proxySettings + 1] = setting
+    LockWhenUnavailable(Settings.CreateCheckbox(category, setting, tooltip))
+end
+
 function addon.InitializeSettings()
     -- Leave search metadata to native registration to avoid tainting Blizzard's search.
     local category, layout = Settings.RegisterVerticalLayoutCategory(L.ADDON_NAME)
     addon.category = category
+    proxySettings = {}
     layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsDescriptionTemplate", {
         text = function()
             return L.DESCRIPTION .. "\n" .. addon.GetScopeNotice() .. "\n" .. L.SCOPE_HELP
         end,
     }))
-    enabledSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_ENABLED",
-        Settings.VarType.Boolean, L.ENABLE_LABELS, true, addon.IsEnabled, function(value)
-            local success, reason = addon.SetEnabled(value)
-            if not success then
-                addon.Print(reason)
-            end
-        end)
-    LockWhenUnavailable(Settings.CreateCheckbox(category, enabledSetting, L.ENABLE_TOOLTIP))
-
-    hideKeybindLabelsSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_HIDE_KEYBIND_LABELS",
-        Settings.VarType.Boolean, L.HIDE_KEYBIND_LABELS, false, addon.ShouldHideKeybindLabels, function(value)
-            local success, reason = addon.SetHideKeybindLabels(value)
-            if not success then
-                addon.Print(reason)
-            end
-        end)
-    LockWhenUnavailable(Settings.CreateCheckbox(category, hideKeybindLabelsSetting, L.HIDE_KEYBIND_LABELS_TOOLTIP))
-
-    hideMacroNamesSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_HIDE_MACRO_NAMES",
-        Settings.VarType.Boolean, L.HIDE_MACRO_NAMES, false, addon.ShouldHideMacroNames, function(value)
-            local success, reason = addon.SetHideMacroNames(value)
-            if not success then
-                addon.Print(reason)
-            end
-        end)
-    LockWhenUnavailable(Settings.CreateCheckbox(category, hideMacroNamesSetting, L.HIDE_MACRO_NAMES_TOOLTIP))
+    RegisterCheckbox(category, "CLEANBINDS_ENABLED", L.ENABLE_LABELS,
+        true, addon.IsEnabled, addon.SetEnabled, L.ENABLE_TOOLTIP)
+    RegisterCheckbox(category, "CLEANBINDS_HIDE_KEYBIND_LABELS", L.HIDE_KEYBIND_LABELS,
+        false, addon.ShouldHideKeybindLabels, addon.SetHideKeybindLabels, L.HIDE_KEYBIND_LABELS_TOOLTIP)
+    RegisterCheckbox(category, "CLEANBINDS_HIDE_MACRO_NAMES", L.HIDE_MACRO_NAMES,
+        false, addon.ShouldHideMacroNames, addon.SetHideMacroNames, L.HIDE_MACRO_NAMES_TOOLTIP)
 
     local function GetFontSize()
         return addon.GetKeybindFontSize() or 0
     end
-    fontSizeSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_KEYBIND_FONT_SIZE",
+    local fontSizeSetting = Settings.RegisterProxySetting(category, "CLEANBINDS_KEYBIND_FONT_SIZE",
         Settings.VarType.Number, L.KEYBIND_FONT_SIZE, 0, GetFontSize, function(value)
             local size = value
             if value == 0 then
@@ -636,6 +617,7 @@ function addon.InitializeSettings()
                 addon.Print(reason)
             end
         end)
+    proxySettings[#proxySettings + 1] = fontSizeSetting
     local fontOptions = Settings.CreateSliderOptions(addon.MIN_KEYBIND_FONT_SIZE, addon.MAX_KEYBIND_FONT_SIZE, 1)
     fontOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
         if not value then

@@ -322,43 +322,29 @@ function addon.SetLabel(bar, index, text, expectedToken)
     return true
 end
 
-function addon.SetEnabled(enabled, expectedToken)
+local function SetBooleanPreference(field, value, expectedToken)
     local allowed, reason = addon.CanEdit(expectedToken)
     if not allowed then
         return false, reason
     end
-    if type(enabled) ~= "boolean" then
-        return false, L.INVALID_DATABASE:format("enabled must be a boolean")
+    if type(value) ~= "boolean" then
+        return false, L.INVALID_DATABASE:format(field .. " must be a boolean")
     end
-    addon.db.enabled = enabled
+    addon.db[field] = value
     Notify()
     return true
+end
+
+function addon.SetEnabled(enabled, expectedToken)
+    return SetBooleanPreference("enabled", enabled, expectedToken)
 end
 
 function addon.SetHideKeybindLabels(hidden, expectedToken)
-    local allowed, reason = addon.CanEdit(expectedToken)
-    if not allowed then
-        return false, reason
-    end
-    if type(hidden) ~= "boolean" then
-        return false, L.INVALID_DATABASE:format("hideKeybindLabels must be a boolean")
-    end
-    addon.db.hideKeybindLabels = hidden
-    Notify()
-    return true
+    return SetBooleanPreference("hideKeybindLabels", hidden, expectedToken)
 end
 
 function addon.SetHideMacroNames(hidden, expectedToken)
-    local allowed, reason = addon.CanEdit(expectedToken)
-    if not allowed then
-        return false, reason
-    end
-    if type(hidden) ~= "boolean" then
-        return false, L.INVALID_DATABASE:format("hideMacroNames must be a boolean")
-    end
-    addon.db.hideMacroNames = hidden
-    Notify()
-    return true
+    return SetBooleanPreference("hideMacroNames", hidden, expectedToken)
 end
 
 function addon.SetKeybindFontSize(size, expectedToken)
