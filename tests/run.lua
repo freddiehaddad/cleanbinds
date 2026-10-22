@@ -981,14 +981,6 @@ local function readySettings(options)
                 element.data = data
                 if template == "CleanBindsDescriptionTemplate" then
                     game.description = data.text
-                elseif template == "CleanBindsFontPreviewTemplate" then
-                    local preview = widget()
-                    for key, method in pairs(environment.CleanBindsFontPreviewMixin) do
-                        preview[key] = method
-                    end
-                    preview:OnLoad()
-                    preview:Init()
-                    game.fontPreview = preview
                 else
                     error("Unexpected initializer: " .. template)
                 end
@@ -3175,13 +3167,15 @@ test("rejected font writes release the guard without corrupting the native defau
     equal(select(2, button.HotKey:GetFont()), 12)
 end)
 
-test("the native font slider has one-unit steps, live previews, and an independent Default reset", function()
+test("the native font slider has one-unit steps, live previews, and Default reset", function()
     local env, addon, fire, pages, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
     local button = mockButton("ActionButton1", "F")
     button.HotKey:SetWidth(24)
     env.MainActionBar = { actionButtons = { button }, IsShown = function() return true end }
     fire("ADDON_LOADED", "Blizzard_ActionBar")
     game.Flush()
+    assert(addon.SetLabel(addon.Bars[1], 1, "MWD"))
+    pages[1]:Show()
     equal(game.fontSlider.options.minValue, 10)
     equal(game.fontSlider.options.maxValue, 14)
     equal(game.fontSlider.options.steps, 4)
@@ -3189,26 +3183,21 @@ test("the native font slider has one-unit steps, live previews, and an independe
     equal(game.fontSizeSetting.default, 0)
     equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
     equal(game.fontSizeSetting.writes, 0)
-    equal(game.fontPreview.Reset.enabled, false)
     game.fontSizeSetting:SetValue(14)
     equal(select(2, button.HotKey:GetFont()), 14)
-    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 14)
-    pages[1]:Show()
     equal(select(2, pages[1].Preview.HotKey:GetFont()), 14)
-    equal(game.fontPreview.Preview.HotKey:GetHeight(), button.HotKey:GetHeight())
+    equal(pages[1].Preview.HotKey:GetHeight(), button.HotKey:GetHeight())
     equal(game.fontSlider.label, "14")
-    equal(game.fontPreview.Status:GetText(), addon.L.LABEL_TOO_WIDE)
+    equal(pages[1].Status:GetText(), addon.L.LABEL_TOO_WIDE)
     game.fontSizeSetting:SetValue(10)
-    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 10)
-    equal(game.fontPreview.Status:GetText(), "")
-    equal(game.fontPreview.Reset.enabled, true)
-    game.fontPreview.Reset:OnClick()
+    equal(select(2, pages[1].Preview.HotKey:GetFont()), 10)
+    equal(pages[1].Status:GetText(), "")
+    assert(game.fontSizeSetting:SetValueToDefault())
     equal(addon.GetKeybindFontSize(), nil)
-    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 11)
+    equal(select(2, pages[1].Preview.HotKey:GetFont()), 11)
     equal(game.fontSlider.value, 11)
     equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
-    equal(game.fontPreview.Reset.enabled, false)
-    equal(game.fontSizeSetting.writes, 2)
+    equal(game.fontSizeSetting.writes, 3)
 end)
 
 test("font controls refresh across scopes without writing and remain read-only during combat", function()
@@ -3222,7 +3211,6 @@ test("font controls refresh across scopes without writing and remain read-only d
     equal(game.fontSizeSetting.writes, 2)
     game.combat = true
     equal(game.fontSlider.canModify(), false)
-    game.fontPreview.Reset:OnClick()
     equal(env.CleanBindsDB.keybindFontSize, 14)
     game.combat = false
     game.Load(2)
@@ -3250,8 +3238,6 @@ test("Blizzard Defaults restores native sizing through the slider notification p
         equal(game.fontSizeSetting:GetValue(), 0)
         equal(game.fontSlider.value, 11)
         equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
-        equal(game.fontPreview.Reset.enabled, false)
-        equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 11)
     end
 end)
 
@@ -3267,7 +3253,6 @@ test("returning the slider to its native size clears the custom preference", fun
     equal(addon.GetKeybindFontSize(), nil)
     equal(slider.value, 11)
     equal(slider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
-    equal(game.fontPreview.Reset.enabled, false)
 
     slider:SetValue(slider.options.minValue)
     equal(addon.GetKeybindFontSize(), 10)
@@ -3276,7 +3261,6 @@ test("returning the slider to its native size clears the custom preference", fun
     local writes = setting.writes
     assert(setting:SetValueToDefault())
     assert(setting:SetValueToDefault())
-    game.fontPreview.Reset:OnClick()
     equal(setting.writes, writes)
     equal(slider.value, 11)
     equal(slider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
@@ -3303,7 +3287,6 @@ test("returning the slider to Default restores each button and preserves the oth
     equal(select(2, first.HotKey:GetFont()), 11)
     equal(select(2, second.HotKey:GetFont()), 13)
     equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
-    equal(game.fontPreview.Reset.enabled, false)
 end)
 
 test("only user slider movement normalizes a size matching the current native font", function()
@@ -3348,7 +3331,6 @@ test("slider return to Default handles the client's floating-point font size", f
         equal(env.CleanBindsDB.keybindFontSize, nil)
         equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12))
         equal(game.fontSlider.value, 12)
-        equal(game.fontPreview.Reset.enabled, false)
         equal(select(2, button.HotKey:GetFont()), nativeSize)
         game.fontSlider:SetValue(game.fontSlider.value + 1)
         equal(addon.GetKeybindFontSize(), 13)
@@ -3370,7 +3352,7 @@ test("font-size precision tolerance does not hide a genuinely fractional native 
     game.fontSlider:SetValue(12)
     equal(addon.GetKeybindFontSize(), 12)
     equal(game.fontSlider.label, "12")
-    game.fontPreview.Reset:OnClick()
+    assert(game.fontSizeSetting:SetValueToDefault())
     equal(addon.GetKeybindFontSize(), nil)
     equal(game.fontSlider.value, 12.25)
     equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(12.25))
@@ -3403,7 +3385,7 @@ test("step buttons accept whole-number choices from a genuinely fractional nativ
             equal(game.fontSlider.label, tostring(expected))
             equal(select(2, button.HotKey:GetFont()), expected)
             equal(button.HotKey:GetHeight(), 10)
-            game.fontPreview.Reset:OnClick()
+            assert(game.fontSizeSetting:SetValueToDefault())
             equal(addon.GetKeybindFontSize(), nil)
             equal(game.fontSlider.value, nativeSize)
             equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(nativeSize))
@@ -3459,7 +3441,7 @@ test("native Defaults restores each font and leaves the other binding scope inta
     game.Switch(1)
     equal(game.fontSlider.value, 14)
     equal(select(2, first.HotKey:GetFont()), 14)
-    game.fontPreview.Reset:OnClick()
+    assert(game.fontSizeSetting:SetValueToDefault())
     equal(game.fontSlider.value, 11)
     equal(env.CleanBindsDB.keybindFontSize, nil)
     equal(select(2, first.HotKey:GetFont()), 11)
@@ -3496,7 +3478,7 @@ test("initializing a reused numeric slider cannot turn Default into a saved size
     local _, addon, _, _, _, game = readySettings()
     local control, setting, slider = game.fontSliderControl, game.fontSizeSetting, game.fontSlider
     slider:SetValue(14)
-    game.fontPreview.Reset:OnClick()
+    assert(setting:SetValueToDefault())
     local writes = setting.writes
     control:Init(control.initializer)
     equal(addon.GetKeybindFontSize(), nil)
@@ -3520,7 +3502,6 @@ test("unavailable default fonts disable the numeric slider until a native size c
     game.Flush()
     equal(game.fontSlider.enabled, false)
     equal(game.fontSlider.label, addon.L.UNAVAILABLE)
-    equal(game.fontPreview.Status:GetText(), addon.L.FONT_REFERENCE_UNAVAILABLE)
     equal(game.fontSizeSetting.writes, 0)
     button.HotKey:SetFont("ReadableFont", 13, "OUTLINE")
     game.Flush()
@@ -3532,13 +3513,14 @@ test("unavailable default fonts disable the numeric slider until a native size c
 end)
 
 test("font previews show the selected size before native action buttons exist", function()
-    local _, addon, _, _, _, game = readySettings()
+    local _, addon, _, pages, _, game = readySettings()
+    pages[1]:Show()
     game.fontSizeSetting:SetValue(14)
-    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 14)
-    equal(game.fontPreview.Preview.HotKey:GetHeight(), 10)
-    game.fontPreview.Reset:OnClick()
+    equal(select(2, pages[1].Preview.HotKey:GetFont()), 14)
+    equal(pages[1].Preview.HotKey:GetHeight(), 10)
+    assert(game.fontSizeSetting:SetValueToDefault())
     equal(addon.GetKeybindFontSize(), nil)
-    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 11)
+    equal(select(2, pages[1].Preview.HotKey:GetFont()), 11)
 end)
 
 test("font previews report restricted fonts and resume when the native font becomes readable", function()
@@ -3549,16 +3531,13 @@ test("font previews report restricted fonts and resume when the native font beco
     fire("ADDON_LOADED", "Blizzard_ActionBar")
     game.Flush()
     game.fontSizeSetting:SetValue(14)
-    equal(game.fontPreview.Preview:IsShown(), false)
-    equal(game.fontPreview.Status:GetText(), addon.L.FONT_REFERENCE_UNAVAILABLE)
     pages[1]:Show()
     equal(pages[1].Preview:IsShown(), false)
     equal(pages[1].Status:GetText(), addon.L.FONT_REFERENCE_UNAVAILABLE)
     button.HotKey:SetFont("ReadableFont", 12, "OUTLINE")
     game.Flush()
-    equal(game.fontPreview.Preview:IsShown(), true)
     equal(pages[1].Preview:IsShown(), true)
-    equal(select(2, game.fontPreview.Preview.HotKey:GetFont()), 14)
+    equal(select(2, pages[1].Preview.HotKey:GetFont()), 14)
 end)
 
 test("font styling waits for startup scope and attaches late buttons without changing their defaults", function()
@@ -3620,7 +3599,6 @@ test("These Settings on the main page resets labels and options in the active se
         equal(game.enabledSetting.displayedValue, true)
         equal(game.hideMacroNamesSetting.displayedValue, false)
         equal(game.fontSlider.label, addon.L.DEFAULT_FONT_SIZE:format(11))
-        equal(game.fontPreview.Reset.enabled, false)
         game.Flush()
         equal(next(active.overrides), nil)
         equal(pages[1].rows[1].Override:GetText(), addon.L.DEFAULT_LABEL)
@@ -3851,7 +3829,7 @@ test("resetting a bar removes unverified labels so later binding reads cannot re
     equal(addon.GetLabel(addon.Bars[1], 1), nil)
 end)
 
-test("native main reset restores text, appearance, and keeps the bar and font-only reset controls", function()
+test("native main reset restores text, appearance, and keeps the bar reset controls", function()
     local env, addon, fire, pages, _, game = readySettings({
         bindings = { ACTIONBUTTON1 = { "F" } }, actions = { [1] = "macro" },
     })
@@ -3873,7 +3851,6 @@ test("native main reset restores text, appearance, and keeps the bar and font-on
         equal(page.Reset:GetText(), addon.L.RESET_BAR)
     end
     assert(env.StaticPopupDialogs.CLEANBINDS_CONFIRM_RESET)
-    assert(game.fontPreview.Reset)
 end)
 
 test("bar reset confirmation can be canceled and is invalidated by scope changes", function()

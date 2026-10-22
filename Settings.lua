@@ -2,7 +2,6 @@ local _, addon = ...
 local L = addon.L
 local pages = {}
 local descriptions = {}
-local fontPreviews = {}
 local enabledSetting
 local hideMacroNamesSetting
 local fontSizeSetting
@@ -181,48 +180,6 @@ local function UpdatePreviewGeometry(preview, button)
     end
 
     return accurate and labelWidth > 0 and labelHeight > 0
-end
-
-CleanBindsFontPreviewMixin = {}
-
-function CleanBindsFontPreviewMixin:OnLoad()
-    self.Preview = CreatePreview(self)
-    self.Preview:SetPoint("TOPLEFT", 8, -8)
-    self.Title = AddText(self, "GameFontNormal", L.PREVIEW)
-    self.Title:SetPoint("TOPLEFT", self.Preview, "TOPRIGHT", 14, -3)
-    self.Status = AddText(self, "GameFontHighlightSmall", "")
-    self.Status:SetPoint("TOPLEFT", self.Title, "BOTTOMLEFT", 0, -8)
-    self.Status:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -130, 8)
-    self.Status:SetJustifyV("TOP")
-    self.Reset = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")
-    self.Reset:SetSize(110, 22)
-    self.Reset:SetPoint("TOPRIGHT", -16, -8)
-    self.Reset:SetText(L.DEFAULT_LABEL)
-    self.Reset:SetScript("OnClick", function()
-        local success, reason = addon.SetKeybindFontSize(nil, self.scopeToken)
-        if not success then
-            addon.Print(reason)
-        end
-    end)
-end
-
-function CleanBindsFontPreviewMixin:Init()
-    fontPreviews[self] = true
-    self:Refresh()
-end
-
-function CleanBindsFontPreviewMixin:Release()
-    fontPreviews[self] = nil
-end
-
-function CleanBindsFontPreviewMixin:Refresh()
-    self.scopeToken = addon.GetScopeToken()
-    local accurate, reason = UpdatePreviewGeometry(self.Preview, addon.GetBarButton(addon.Bars[1], 1))
-    self.Preview:SetShown(reason == nil)
-    self.Preview.HotKey:SetText(L.FONT_SIZE_SAMPLE)
-    self.Status:SetText(reason or (self.Preview.HotKey:IsTruncated() and L.LABEL_TOO_WIDE
-        or (not accurate and L.PREVIEW_APPROXIMATE or "")))
-    self.Reset:SetEnabled(addon.CanEdit() and addon.GetKeybindFontSize() ~= nil)
 end
 
 local function UpdatePreview(page)
@@ -416,9 +373,6 @@ local function RefreshPages()
     end
     if fontSizeSetting then
         fontSizeSetting:NotifyUpdate()
-    end
-    for preview in pairs(fontPreviews) do
-        preview:Refresh()
     end
     for frame in pairs(descriptions) do
         frame.Text:SetText(frame.initializer.data.text())
@@ -680,7 +634,6 @@ function addon.InitializeSettings()
         fontSizeSetting, fontOptions, L.KEYBIND_FONT_SIZE_TOOLTIP)
     LockWhenUnavailable(fontSlider)
     layout:AddInitializer(fontSlider)
-    layout:AddInitializer(Settings.CreateElementInitializer("CleanBindsFontPreviewTemplate", {}))
 
     for _, bar in ipairs(addon.Bars) do
         local page = CreatePage(bar)

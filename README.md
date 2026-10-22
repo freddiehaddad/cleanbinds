@@ -90,9 +90,8 @@ to show names again. **Reset This Bar** leaves this preference unchanged.
 ## Keybinding font size
 
 Use the **Keybinding font size** slider on the main Clean Binds page to choose
-a size from **10 to 14**. The preview updates as you adjust it; the step buttons
-allow precise changes. Returning to the default size or pressing **Default**
-restores each button's native font size.
+a size from **10 to 14**. The step buttons allow precise changes, and returning
+the slider to the default size restores each button's native font size.
 
 This applies to both native and custom keybind labels, even with **Enable custom
 labels** unchecked. Macro names, cooldown text, and button sizes are unchanged.
