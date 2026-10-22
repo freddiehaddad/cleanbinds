@@ -38,19 +38,43 @@ local function WriteRegion(record, region, method, ...)
     end
 end
 
+local function RestoreHotkeyShown(record)
+    if not record.hotkey:IsShown() then
+        if type(ACTIONBAR_HOTKEY_FONT_COLOR) == "table"
+            and type(ACTIONBAR_HOTKEY_FONT_COLOR.GetRGB) == "function"
+            and type(record.hotkey.SetVertexColor) == "function" then
+            WriteRegion(record, record.hotkey, "SetVertexColor", ACTIONBAR_HOTKEY_FONT_COLOR:GetRGB())
+        end
+        WriteRegion(record, record.hotkey, "Show")
+    end
+end
+
 local function ApplyHotkeyText(record)
+    record.hideAfterSetText = false
+    local shouldHide = addon.ShouldHideKeybindLabels()
     if IsForbidden(record.button) or IsForbidden(record.hotkey) or not record.readable then
-        if addon.GetLabel(record.bar, record.index) then
+        if shouldHide or record.hidden or addon.GetLabel(record.bar, record.index) then
             Warn(record)
         end
         return
     end
 
     local _, keys = addon.GetBindingInfo(record.bar, record.index)
-    local label = addon.IsEnabled() and keys[1] and addon.GetLabel(record.bar, record.index)
     local blankNativeText = record.nativeText == nil or record.nativeText == ""
-    if blankNativeText and not record.allowBlank then
-        label = nil
+    local hasNativeSlot = not blankNativeText or record.allowBlank
+    local hidden = shouldHide and keys[1] and hasNativeSlot
+    local label = not hidden and addon.IsEnabled() and keys[1] and hasNativeSlot
+        and addon.GetLabel(record.bar, record.index)
+
+    if hidden then
+        if not record.hidden then
+            local hiddenText = record.bar.id == "stance" and "" or RANGE_INDICATOR
+            WriteRegion(record, record.hotkey, "SetText", hiddenText)
+            WriteRegion(record, record.hotkey, "Hide")
+            record.hidden = true
+            record.appliedText = nil
+        end
+        return
     end
 
     if label then
@@ -59,13 +83,19 @@ local function ApplyHotkeyText(record)
         if text == RANGE_INDICATOR then
             text = text .. "|r"
         end
-        if record.appliedText ~= text then
+        if record.hidden or record.appliedText ~= text then
             WriteRegion(record, record.hotkey, "SetText", text)
             record.appliedText = text
         end
-    elseif record.appliedText then
+    elseif record.hidden or record.appliedText then
         WriteRegion(record, record.hotkey, "SetText", record.nativeText)
         record.appliedText = nil
+    end
+    if record.hidden then
+        if keys[1] and hasNativeSlot then
+            RestoreHotkeyShown(record)
+        end
+        record.hidden = false
     end
 end
 
@@ -98,7 +128,7 @@ end
 local function ApplyHotkeyFont(record)
     local size = addon.GetKeybindFontSize()
     local _, keys = addon.GetBindingInfo(record.bar, record.index)
-    if not keys[1] then
+    if not keys[1] or addon.ShouldHideKeybindLabels() then
         size = nil
     end
     if not size and not record.fontManaged then
@@ -277,7 +307,7 @@ local function TrackButton(button, bar, index)
     end
 
     if IsForbidden(button) then
-        if addon.GetLabel(bar, index) then
+        if addon.ShouldHideKeybindLabels() or addon.GetLabel(bar, index) then
             Warn({ button = button, bar = bar, index = index })
         end
         if addon.GetKeybindFontSize() then
@@ -288,7 +318,7 @@ local function TrackButton(button, bar, index)
 
     local hotkey = button.HotKey
     if not hotkey or IsForbidden(hotkey) then
-        if addon.GetLabel(bar, index) then
+        if addon.ShouldHideKeybindLabels() or addon.GetLabel(bar, index) then
             Warn({ button = button, bar = bar, index = index })
         end
         if hotkey and addon.GetKeybindFontSize() then
@@ -318,7 +348,23 @@ local function TrackButton(button, bar, index)
         record.readable = IsReadable(text)
         record.allowBlank = false
         record.appliedText = nil
+        record.hidden = false
         ApplyHotkey(record)
+        if record.hidden then
+            record.hideAfterSetText = true
+            QueueRefresh()
+        end
+    end)
+    hooksecurefunc(hotkey, "Show", function()
+        if record.writing and record.writing.Show then
+            return
+        end
+        if record.hideAfterSetText then
+            record.hideAfterSetText = false
+            if record.hidden then
+                WriteRegion(record, record.hotkey, "Hide")
+            end
+        end
     end)
     button:HookScript("OnShow", function()
         ApplyHotkey(record)

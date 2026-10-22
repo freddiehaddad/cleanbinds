@@ -60,10 +60,11 @@ local function CheckCapabilities()
     end
 end
 
-local function NewProfile(enabled, hideMacroNames, keybindFontSize)
+local function NewProfile(enabled, hideMacroNames, keybindFontSize, hideKeybindLabels)
     return {
         schemaVersion = schemaVersion,
         enabled = enabled,
+        hideKeybindLabels = hideKeybindLabels == true,
         hideMacroNames = hideMacroNames == true,
         keybindFontSize = keybindFontSize,
         overrides = {},
@@ -80,6 +81,9 @@ local function ValidateProfile(db)
     end
     if type(db.enabled) ~= "boolean" then
         return nil, L.INVALID_DATABASE:format("enabled must be a boolean")
+    end
+    if db.hideKeybindLabels ~= nil and type(db.hideKeybindLabels) ~= "boolean" then
+        return nil, L.INVALID_DATABASE:format("hideKeybindLabels must be a boolean")
     end
     if db.hideMacroNames ~= nil and type(db.hideMacroNames) ~= "boolean" then
         return nil, L.INVALID_DATABASE:format("hideMacroNames must be a boolean")
@@ -110,7 +114,8 @@ function addon.GetProfile(scope)
             if not account then
                 return nil, reason
             end
-            CleanBindsCharacterDB = NewProfile(account.enabled, account.hideMacroNames, account.keybindFontSize)
+            CleanBindsCharacterDB = NewProfile(
+                account.enabled, account.hideMacroNames, account.keybindFontSize, account.hideKeybindLabels)
         end
         return ValidateProfile(CleanBindsCharacterDB)
     end
