@@ -35,7 +35,6 @@ addon.L = {
     KEYBIND_FONT_SIZE = "Keybinding font size",
     DEFAULT_FONT_SIZE = "Default (%g)",
     KEYBIND_FONT_SIZE_TOOLTIP = "Adjust native and custom keybinding text on all supported bars. Default restores each button's native font size. UI and action-bar scaling still apply.",
-    FONT_SIZE_SAMPLE = "MWD",
     INVALID_FONT_SIZE = "Choose a whole-number font size from %d to %d.",
     FONT_REFERENCE_UNAVAILABLE = "The native keybinding font is unavailable.",
     ACTION_BUTTON = "Action button",
