@@ -49,7 +49,7 @@ Releases. Place the extracted **CleanBinds** folder in your WoW Forever AddOns
 folder. Within your World of Warcraft installation, the file layout should be:
 
 ```text
-_classic_beta_\Interface\AddOns\CleanBinds\CleanBinds.toc
+_forever_\Interface\AddOns\CleanBinds\CleanBinds.toc
 ```
 
 On GitHub, choose the **CleanBinds-VERSION-forever.zip** release asset, not the
