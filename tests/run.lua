@@ -3775,7 +3775,7 @@ end)
 test("native resets stay read-only during combat or an unresolved binding scope", function()
     for _, condition in ipairs({ "combat", "loading", "unknown" }) do
         for _, target in ipairs({ "bar", "main", "all" }) do
-            local env, addon, _, pages, messages, game = readySettings()
+            local env, addon, fire, pages, messages, game = readySettings()
             assert(addon.SetLabel(addon.Bars[1], 1, "Keep"))
             assert(addon.SetEnabled(false))
             assert(addon.SetHideMacroNames(true))
@@ -3802,6 +3802,9 @@ test("native resets stay read-only during combat or an unresolved binding scope"
             assert(#messages > 0)
             if condition == "combat" then
                 equal(messages[#messages], addon.L.ADDON_NAME .. ": " .. addon.L.COMBAT_READ_ONLY)
+                equal(game.fontSlider.value, 14)
+                game.combat = false
+                fire("PLAYER_REGEN_ENABLED")
                 equal(game.enabledSetting.displayedValue, false)
                 equal(game.hideMacroNamesSetting.displayedValue, true)
                 equal(game.fontSlider.value, 14)
@@ -4113,6 +4116,54 @@ test("hiding keybind labels uses the unbound range indicator state and restores 
     equal(addon.ShouldHideKeybindLabels(), false)
     equal(bound.HotKey:GetText(), "F")
     equal(bound.HotKey:IsShown(), true)
+end)
+
+test("combat and action-bar events do not notify proxy settings during combat", function()
+    local env, addon, fire, pages, _, game = readySettings({ bindings = { ACTIONBUTTON1 = { "F" } } })
+    local button = mockButton("ActionButton1", "F")
+    env.MainActionBar = { actionButtons = { button } }
+    fire("ADDON_LOADED", "Blizzard_ActionBar")
+    game.Flush()
+    pages[9]:Show()
+
+    local function totalUpdates()
+        return game.enabledSetting.updates + game.hideKeybindLabelsSetting.updates
+            + game.hideMacroNamesSetting.updates + game.fontSizeSetting.updates
+    end
+
+    local before = totalUpdates()
+    for _, event in ipairs({
+        "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR",
+        "UPDATE_VEHICLE_ACTIONBAR", "UPDATE_MACROS", "UPDATE_SHAPESHIFT_FORM", "PET_BAR_UPDATE",
+    }) do
+        fire(event)
+        game.Flush()
+    end
+    button.HotKey:SetText("F")
+    game.Flush()
+    equal(totalUpdates(), before)
+
+    game.combat = true
+    fire("PLAYER_REGEN_DISABLED")
+    equal(pages[9].Reset.enabled, false)
+    equal(pages[9].Status:GetText(), addon.L.COMBAT_READ_ONLY)
+    for _, event in ipairs({
+        "ACTIONBAR_SLOT_CHANGED", "PET_BAR_UPDATE", "UPDATE_SHAPESHIFT_FORM",
+        "UI_SCALE_CHANGED", "UPDATE_BINDINGS",
+    }) do
+        fire(event)
+        game.Flush()
+    end
+    button.HotKey:SetFont("CombatFont", 13, "OUTLINE")
+    game.Flush()
+    equal(totalUpdates(), before)
+
+    game.combat = false
+    fire("PLAYER_REGEN_ENABLED")
+    game.Flush()
+    assert(totalUpdates() > before)
+    equal(game.fontSlider.value, 13)
+    equal(pages[9].Reset.enabled, true)
 end)
 
 print(("%d tests passed"):format(passed))

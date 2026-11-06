@@ -362,12 +362,15 @@ local function RefreshPage(page)
     UpdatePreview(page)
 end
 
-local function RefreshPages()
-    for _, setting in ipairs(proxySettings) do
-        setting:NotifyUpdate()
-    end
-    for frame in pairs(descriptions) do
-        frame.Text:SetText(frame.initializer.data.text())
+local function RefreshPages(pagesOnly)
+    -- SmartNavigation blocks addon-tainted control state updates while in combat.
+    if not pagesOnly and not InCombatLockdown() then
+        for _, setting in ipairs(proxySettings) do
+            setting:NotifyUpdate()
+        end
+        for frame in pairs(descriptions) do
+            frame.Text:SetText(frame.initializer.data.text())
+        end
     end
     for _, page in ipairs(pages) do
         if page:IsShown() then
@@ -688,7 +691,7 @@ function addon.InitializeSettings()
             end
         end
         if event ~= "GLOBAL_MOUSE_DOWN" then
-            RefreshPages()
+            RefreshPages(event == "UPDATE_SHAPESHIFT_FORM" or event == "PET_BAR_UPDATE")
         end
     end)
 end

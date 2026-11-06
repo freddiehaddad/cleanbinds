@@ -4,7 +4,12 @@ local macroRecords = {}
 local warned = {}
 local initialized = false
 local refreshQueued = false
+local settingsRefreshQueued = false
 local QueueRefresh
+
+local function QueueSettingsRefresh()
+    QueueRefresh(true)
+end
 
 local function IsReadable(value)
     return type(issecretvalue) ~= "function" or not issecretvalue(value)
@@ -178,18 +183,18 @@ local function TrackFont(record)
             record.nativeFont = { font, size, flags }
             record.fontObject = nil
             ApplyHotkeyFont(record)
-            QueueRefresh()
+            QueueSettingsRefresh()
         end
     end)
     hooksecurefunc(hotkey, "SetFontObject", function()
         if not IsWritingFont(record) then
             CaptureFont(record, hotkey:GetFontObject())
             ApplyHotkeyFont(record)
-            QueueRefresh()
+            QueueSettingsRefresh()
         end
     end)
-    hooksecurefunc(hotkey, "SetHeight", QueueRefresh)
-    hooksecurefunc(hotkey, "SetSize", QueueRefresh)
+    hooksecurefunc(hotkey, "SetHeight", QueueSettingsRefresh)
+    hooksecurefunc(hotkey, "SetSize", QueueSettingsRefresh)
 end
 
 function addon.GetPreviewKeybindFont(button, useNativeFont)
@@ -388,13 +393,18 @@ function addon.RefreshActionLabels()
     end
 end
 
-QueueRefresh = function()
+QueueRefresh = function(refreshSettings)
+    if refreshSettings == true then
+        settingsRefreshQueued = true
+    end
     if not refreshQueued then
         refreshQueued = true
         C_Timer.After(0, function()
+            local shouldRefreshSettings = settingsRefreshQueued
             refreshQueued = false
+            settingsRefreshQueued = false
             addon.RefreshActionLabels()
-            if addon.RefreshSettings then
+            if shouldRefreshSettings and addon.RefreshSettings then
                 addon.RefreshSettings()
             end
         end)
@@ -415,5 +425,7 @@ function addon.InitializeActionLabels()
     }) do
         events:RegisterEvent(event)
     end
-    events:SetScript("OnEvent", QueueRefresh)
+    events:SetScript("OnEvent", function(_, event)
+        QueueRefresh(event == "ADDON_LOADED")
+    end)
 end
