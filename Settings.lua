@@ -669,7 +669,7 @@ function addon.InitializeSettings()
     for _, event in ipairs({
         "UPDATE_BINDINGS", "GAME_PAD_ACTIVE_CHANGED", "PLAYER_REGEN_DISABLED",
         "PLAYER_REGEN_ENABLED", "UI_SCALE_CHANGED", "GLOBAL_MOUSE_DOWN",
-        "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "UPDATE_SHAPESHIFT_FORM", "PET_BAR_UPDATE",
+        "PLAYER_ENTERING_WORLD", "UPDATE_SHAPESHIFT_FORM", "PET_BAR_UPDATE",
     }) do
         events:RegisterEvent(event)
     end
